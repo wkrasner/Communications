@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Personal phone screen on Telnyx (press-1 challenge, voicemail, call log)
+
+Parameters:
+  TelnyxApiKey: { Type: String, NoEcho: true }
+  TelnyxPublicKey: { Type: String, NoEcho: true }
+  AdminToken: { Type: String, NoEcho: true }
+  RingTarget: { Type: String, Description: 'sip:USERNAME@sip.telnyx.com' }
+  CellDid: { Type: String, Description: 'Telnyx number the cell forwards to, +1XXXXXXXXXX' }
+  GvDid: { Type: String, Description: 'Telnyx number Google Voice forwards to, +1XXXXXXXXXX' }
+
+Resources:
+  Api:
+    Type: AWS::Serverless::HttpApi
+
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: gsi1pk, AttributeType: S }
+        - { AttributeName: gsi1sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: byTime
+          KeySchema:
+            - { AttributeName: gsi1pk, KeyType: HASH }
+            - { AttributeName: gsi1sk, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  VoicemailBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  Fn:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Architectures: [x86_64]
+      Timeout: 25
+      MemorySize: 256
+      Environment:
+        Variables:
+          TELNYX_API_KEY: !Ref TelnyxApiKey
+          TELNYX_PUBLIC_KEY: !Ref TelnyxPublicKey
+          ADMIN_TOKEN: !Ref AdminToken
+          RING_TARGET: !Ref RingTarget
+          CELL_DID: !Ref CellDid
+          GV_DID: !Ref GvDid
+          TABLE_NAME: !Ref Table
+          VOICEMAIL_BUCKET: !Ref VoicemailBucket
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref Table }
+        - S3CrudPolicy: { BucketName: !Ref VoicemailBucket }
+      Events:
+        Any:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  WebhookUrl:
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/telnyx'
+  AdminUrl:
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/admin'

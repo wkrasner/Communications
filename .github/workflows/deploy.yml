@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - run: python -m unittest discover -s tests -v
+      - run: sam build
+      - name: Deploy
+        run: |
+          sam deploy \
+            --stack-name personal-phone \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "TelnyxApiKey=${{ secrets.TELNYX_API_KEY }}" \
+              "TelnyxPublicKey=${{ secrets.TELNYX_PUBLIC_KEY }}" \
+              "AdminToken=${{ secrets.ADMIN_TOKEN }}" \
+              "RingTarget=${{ secrets.RING_TARGET }}" \
+              "CellDid=${{ secrets.CELL_DID }}" \
+              "GvDid=${{ secrets.GV_DID }}"
+      - name: Show URLs
+        run: |
+          aws cloudformation describe-stacks --stack-name personal-phone \
+            --query 'Stacks[0].Outputs' --output table
