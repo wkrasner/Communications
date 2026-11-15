@@ -51,8 +51,8 @@ class Flow(unittest.TestCase):
         ccid, action, body = self.last()
         self.assertEqual((ccid, action), ("A", "transfer"))
         self.assertEqual(body["to"], "sip:me@sip.telnyx.com")
-        self.assertEqual(body["from"], "+12155551234")
-        self.assertEqual(body["from_display_name"], "GV: Mom")
+        self.assertEqual(body["from"], "+16095550002")  # our DID, not the caller's number
+        self.assertEqual(body["from_display_name"], "GV Mom")
         ring = body["client_state"]
         self.ev("call.initiated", ccid="B", state=ring, direction="outgoing")
         self.ev("call.answered", ccid="B", state=ring)
@@ -87,7 +87,8 @@ class Flow(unittest.TestCase):
         self.ev("call.gather.ended", state=body["client_state"], digits="1", status="valid")
         ccid, action, body = self.last()
         self.assertEqual((ccid, action), ("A", "transfer"))
-        self.assertEqual(body["from_display_name"], "Cell: screened")
+        self.assertEqual(body["from_display_name"], "Cell +12155551234")
+        self.assertEqual(body["from"], "+16095550001")
         # softphone does not pick up: leg A is already answered, so greet directly
         self.ev("call.hangup", ccid="B", state=body["client_state"], hangup_cause="timeout")
         self.assertEqual(self.last()[:2], ("A", "speak"))

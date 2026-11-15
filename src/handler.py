@@ -141,8 +141,15 @@ def decode_state(s):
         return {}
 
 
+LAST_ERROR = {}
+
+
 def telnyx(ccid, action, body, event_id=""):
-    """Send a call command. Returns True on success; never raises."""
+    """Send a call command. Returns True on success; never raises.
+
+    Failures are recorded in LAST_ERROR so the caller can store the reason
+    on the call record — Telnyx refusals are otherwise invisible from here.
+    """
     if event_id:
         # Telnyx ignores repeat commands with the same command_id on a call,
         # which makes webhook redelivery safe.
@@ -161,8 +168,11 @@ def telnyx(ccid, action, body, event_id=""):
             r.read()
         return True
     except urllib.error.HTTPError as e:
-        print(f"telnyx {action} failed {e.code}: {e.read()[:300]!r}")
+        detail = e.read()[:400].decode("utf-8", "replace")
+        LAST_ERROR[ccid] = f"{action} {e.code}: {detail}"
+        print(f"telnyx {LAST_ERROR[ccid]}")
     except Exception as e:  # network errors, timeouts
+        LAST_ERROR[ccid] = f"{action}: {e}"
         print(f"telnyx {action} error: {e}")
     return False
 
@@ -186,7 +196,13 @@ def verify_signature(raw, headers):
 
 # ---------- call flow ----------
 
-def ring_softphone(a_ccid, caller, label, a_answered, event_id):
+def ring_softphone(a_ccid, did, label, a_answered, event_id):
+    """Ring the softphone.
+
+    `from` must be a number on the account — presenting the original
+    caller's number is rejected as unauthorized caller ID — so the DID the
+    call arrived on is used, and who is calling goes in the display name.
+    """
     body = {
         "to": RING_TARGET,
         "timeout_secs": RING_SECS,
@@ -194,8 +210,8 @@ def ring_softphone(a_ccid, caller, label, a_answered, event_id):
         # state for the NEW leg, so its answer/hangup tells us what to do with leg A
         "client_state": encode_state({"s": "ring", "a": a_ccid, "aa": 1 if a_answered else 0}),
     }
-    if caller:
-        body["from"] = caller
+    if did:
+        body["from"] = did
     return telnyx(a_ccid, "transfer", body, event_id)
 
 
@@ -213,7 +229,8 @@ def on_initiated(p, event_id):
         return  # the leg we created toward the softphone
     ccid = p["call_control_id"]
     caller = normalize(p.get("from"))
-    line = LINES.get(p.get("to", ""), "Other")
+    did = p.get("to", "")
+    line = LINES.get(did, "Other")
     entry = db_get(f"NUM#{caller}") if caller else None
     status = (entry or {}).get("status", "unknown")
     name = (entry or {}).get("name", "")
@@ -222,9 +239,9 @@ def on_initiated(p, event_id):
     record = {
         "pk": pk, "sk": "META", "gsi1pk": "CALLS", "gsi1sk": ts,
         "ts": ts, "from": caller or "anonymous", "name": name, "line": line,
-        "list": status, "answered": False,
+        "did": did, "list": status, "answered": False,
     }
-    label = f"{line}: {name}" if name else line
+    label = f"{line} {name or caller or 'unknown'}"
 
     if status == "block":
         record["result"] = "blocked"
@@ -233,8 +250,8 @@ def on_initiated(p, event_id):
     elif status == "allow":
         record["result"] = "missed"
         db_put(record)
-        if not ring_softphone(ccid, caller, label, False, event_id):
-            db_update(pk, result="ring_failed")
+        if not ring_softphone(ccid, did, label, False, event_id):
+            db_update(pk, result="ring_failed", error=LAST_ERROR.get(ccid, "")[:400])
             telnyx(ccid, "answer", {"client_state": encode_state({"s": "vm"})}, event_id)
     else:
         record["result"] = "screening"
@@ -273,13 +290,11 @@ def on_gather_ended(p, state, event_id):
     if p.get("digits") == "1":
         db_update(pk, result="missed", screen="passed")
         rec = db_get(pk) or {}
-        caller = rec.get("from", "")
-        ok = ring_softphone(ccid, caller if caller.startswith("+") else "",
-                            f"{rec.get('line', 'Other')}: screened", True, event_id)
-        if not ok:
+        label = f"{rec.get('line', 'Other')} {rec.get('from', 'unknown')}"
+        if not ring_softphone(ccid, rec.get("did", ""), label, True, event_id):
             # The softphone could not be reached at all (not registered, bad
             # credentials). No leg B exists, so no hangup webhook is coming.
-            db_update(pk, result="ring_failed")
+            db_update(pk, result="ring_failed", error=LAST_ERROR.get(ccid, "")[:400])
             start_voicemail_greeting(ccid, event_id)
     else:
         db_update(pk, result="screen_failed", screen="failed")
