@@ -366,3 +366,8 @@ class Pages(Base):
         self.assertIn("max-width: 720px", body)       # layout switch
         self.assertIn("min-width: 721px", body)       # side-by-side panes
         self.assertIn("viewport-fit=cover", body)     # safe-area on phones
+
+    def test_hidden_panels_actually_hide(self):
+        """Rules like .composer { display: flex } beat the UA's [hidden] rule."""
+        body = self.get("/admin")["body"]
+        self.assertIn("[hidden] { display: none !important; }", body)
