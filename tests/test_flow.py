@@ -296,3 +296,22 @@ class Transcription(Base):
         self.db["CALL#S1"] = {"pk": "CALL#S1"}
         h.run_transcription({"pk": "CALL#S1", "key": "calls/S1.mp3", "field": "transcript"})
         self.assertEqual(self.db["CALL#S1"]["transcript"], "(no transcript)")
+
+
+class GatewayAuth(Base):
+    def call(self, headers=None, query=None):
+        h.GATEWAY_SECRET = "right"
+        return h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                                 "rawPath": "/gateway", "headers": headers or {},
+                                 "queryStringParameters": query, "body": "{}"}, None)
+
+    def test_secret_in_header_is_accepted(self):
+        self.assertEqual(self.call(headers={"x-gateway-secret": "right"})["statusCode"], 200)
+
+    def test_secret_in_query_string_is_accepted(self):
+        self.assertEqual(self.call(query={"k": "right"})["statusCode"], 200)
+
+    def test_wrong_secret_is_rejected_either_way(self):
+        self.assertEqual(self.call(query={"k": "wrong"})["statusCode"], 401)
+        self.assertEqual(self.call(headers={"x-gateway-secret": "wrong"})["statusCode"], 401)
+        self.assertEqual(self.call()["statusCode"], 401)

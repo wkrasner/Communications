@@ -651,7 +651,10 @@ def lambda_handler(event, context):
         return respond(200, {"ok": True})
 
     if path == "/gateway" and method == "POST":
-        token = headers.get("x-gateway-secret", "")
+        # Header or query string: the Android gateway app can set a URL but
+        # not always a custom header.
+        token = (headers.get("x-gateway-secret")
+                 or (event.get("queryStringParameters") or {}).get("k") or "")
         if not GATEWAY_SECRET or not hmac.compare_digest(token, GATEWAY_SECRET):
             return respond(401, {"error": "unauthorized"})
         try:
