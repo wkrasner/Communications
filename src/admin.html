@@ -2,90 +2,155 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>Communications</title>
 <style>
-  :root { color-scheme: light dark; --line: #8884; --accent: #2563eb; --soft: #8881; }
-  * { box-sizing: border-box; }
-  body { font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 12px;
-         max-width: 1100px; margin-inline: auto; }
-  h1 { font-size: 18px; margin: 4px 0 10px; }
-  nav { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-  button { font: inherit; padding: 7px 11px; border: 1px solid var(--line);
-           border-radius: 8px; background: none; color: inherit; cursor: pointer; }
+  :root {
+    color-scheme: light dark;
+    --line: #8884; --soft: #8881; --accent: #2563eb;
+    --pad: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font: 16px/1.45 system-ui, -apple-system, sans-serif;
+    margin: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  button {
+    font: inherit; padding: 9px 13px; border: 1px solid var(--line);
+    border-radius: 9px; background: none; color: inherit; cursor: pointer;
+    min-height: 40px;
+  }
   button.on, button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.small { padding: 3px 8px; font-size: 13px; }
-  input, textarea { font: inherit; padding: 8px; border: 1px solid var(--line);
-                    border-radius: 8px; background: none; color: inherit; width: 100%; }
-  .muted { opacity: .65; font-size: 13px; }
-  .tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); }
+  button.small { padding: 5px 10px; font-size: 13px; min-height: 32px; }
+  button.icon { border: 0; padding: 6px 10px; font-size: 20px; min-width: 40px; }
+  input, textarea {
+    font: inherit; font-size: 16px; padding: 10px; border: 1px solid var(--line);
+    border-radius: 9px; background: none; color: inherit; width: 100%;
+  }
+  .muted { opacity: .62; font-size: 13px; }
+  .tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
   .flag { border-color: #d97706; color: #d97706; }
-  .contact { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
-  .chead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-           padding: 9px 11px; background: var(--soft); cursor: pointer; }
-  .chead .grow { flex: 1; min-width: 140px; }
-  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
-  .pane { background: Canvas; padding: 10px; min-height: 60px; }
-  .pane h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
-             opacity: .6; margin: 0 0 8px; font-weight: 600; }
-  .item { padding: 6px 0; border-bottom: 1px solid var(--soft); }
-  .item:last-child { border-bottom: 0; }
-  .out { text-align: right; }
-  .out .bubble { background: var(--accent); color: #fff; }
-  .script { margin-top: 5px; padding: 6px 9px; border-left: 2px solid var(--line);
-            font-size: 13.5px; white-space: pre-wrap; opacity: .9; }
-  .bubble { display: inline-block; padding: 5px 10px; border-radius: 12px;
-            background: var(--soft); max-width: 85%; text-align: left; white-space: pre-wrap; }
-  .reply { display: flex; gap: 6px; margin-top: 9px; }
-  .reply input { flex: 1; }
-  .answered { color: #16a34a; } .blocked, .screen_failed, .ring_failed { color: #dc2626; }
+  .answered { color: #16a34a; }
+  .blocked, .screen_failed, .ring_failed { color: #dc2626; }
   .missed, .screening { color: #d97706; }
-  #msg { min-height: 20px; font-size: 13px; margin-bottom: 8px; }
-  .stack > * { margin-bottom: 8px; }
-  @media (max-width: 680px) { .panes { grid-template-columns: 1fr; } }
+
+  header {
+    display: flex; gap: 8px; align-items: center; padding: 10px 12px;
+    border-bottom: 1px solid var(--line); flex-shrink: 0;
+  }
+  header h1 { font-size: 17px; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+  main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: var(--pad); }
+  #msg { font-size: 13px; opacity: .65; }
+  #msg:not(:empty) { padding: 6px 12px; }
+
+  .row {
+    display: flex; gap: 10px; align-items: center; width: 100%;
+    padding: 12px; border-bottom: 1px solid var(--soft); text-align: left;
+    border-radius: 0; min-height: 56px;
+  }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .ttl { font-weight: 600; }
+  .row .prev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .thread { padding: 12px; }
+  .pane h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    opacity: .55; margin: 0 0 8px; font-weight: 700;
+  }
+  .item { padding: 7px 0; border-bottom: 1px solid var(--soft); }
+  .item:last-child { border-bottom: 0; }
+  .bubble {
+    display: inline-block; padding: 7px 11px; border-radius: 14px;
+    background: var(--soft); max-width: 88%; white-space: pre-wrap; word-wrap: break-word;
+  }
+  .out { text-align: right; }
+  .out .bubble { background: var(--accent); color: #fff; text-align: left; }
+  .script {
+    margin-top: 5px; padding: 6px 9px; border-left: 2px solid var(--line);
+    font-size: 14px; white-space: pre-wrap; opacity: .9;
+  }
+  .composer {
+    display: flex; gap: 8px; padding: 10px 12px calc(10px + var(--pad));
+    border-top: 1px solid var(--line); flex-shrink: 0;
+  }
+  .composer input { flex: 1; }
+
+  /* Wide screens: every contact on one page, calls and texts side by side. */
+  @media (min-width: 721px) {
+    header, .bar, main, .composer { max-width: 1100px; margin-inline: auto; width: 100%; }
+    .contact { border: 1px solid var(--line); border-radius: 11px; margin: 0 12px 12px; overflow: hidden; }
+    .chead { display: flex; gap: 9px; align-items: center; padding: 10px 12px; background: var(--soft); }
+    .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+    .pane { background: Canvas; padding: 11px; }
+    .reply { display: flex; gap: 7px; margin-top: 10px; }
+    .reply input { flex: 1; }
+  }
 </style>
 </head>
 <body>
-<h1>Communications</h1>
-<div id="login" class="stack" hidden>
-  <input id="token" type="password" placeholder="Admin token" autocomplete="current-password">
+
+<div id="login" hidden style="padding:24px; max-width:380px; margin:40px auto; display:grid; gap:10px">
+  <h1 style="font-size:19px;margin:0">Communications</h1>
+  <input id="token" type="password" placeholder="Admin token" autocomplete="current-password"
+         onkeydown="if(event.key==='Enter')saveToken()">
   <button class="primary" onclick="saveToken()">Sign in</button>
 </div>
-<div id="app" hidden>
-  <nav>
-    <button id="tabInbox" onclick="show('inbox')">Inbox</button>
-    <button id="tabNums" onclick="show('nums')">Numbers</button>
-    <button onclick="refresh()">Refresh</button>
-    <button onclick="signOut()" style="margin-left:auto">Sign out</button>
-  </nav>
-  <input id="search" placeholder="Search calls and texts…" oninput="render()" style="margin-bottom:10px">
-  <div id="msg" class="muted"></div>
-  <section id="inbox"></section>
-  <section id="nums" hidden>
-    <div class="stack">
-      <textarea id="bulk" rows="5" placeholder="One per line: number, name&#10;609-555-0123, Dr. Smith"></textarea>
-      <div style="display:flex; gap:8px">
-        <button class="primary" onclick="bulkAdd('allow')">Add as allowed</button>
-        <button onclick="bulkAdd('block')">Add as blocked</button>
-      </div>
-    </div>
-    <div id="numList"></div>
-  </section>
+
+<header id="hdr" hidden>
+  <button class="icon" id="back" onclick="closeThread()" hidden>&larr;</button>
+  <h1 id="title">Communications</h1>
+  <button class="icon" onclick="refresh()" title="Refresh">&#8635;</button>
+  <button class="icon" onclick="toggleMenu()" title="Menu">&#8942;</button>
+</header>
+
+<div class="bar" id="menu" hidden>
+  <button id="tabInbox" onclick="show('inbox')">Inbox</button>
+  <button id="tabNums" onclick="show('nums')">Numbers</button>
+  <button onclick="signOut()" style="margin-left:auto">Sign out</button>
 </div>
+
+<div class="bar" id="searchbar" hidden>
+  <input id="search" placeholder="Search calls and texts…" oninput="render()">
+</div>
+
+<div id="msg"></div>
+
+<main id="main" hidden></main>
+
+<div class="composer" id="composer" hidden>
+  <input id="reply" placeholder="Reply…" onkeydown="if(event.key==='Enter')sendText()">
+  <button class="primary" onclick="sendText()">Send</button>
+</div>
+
 <script>
 let token = '';
 try { token = localStorage.getItem('adminToken') || ''; } catch (e) {}
-let calls = [], msgs = [], officeText = '', open = new Set();
+
+let calls = [], msgs = [], officeText = '';
+let tab = 'inbox', openKey = null, expanded = new Set();
+const narrow = window.matchMedia('(max-width: 720px)');
+
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const say = t => { $('msg').textContent = t; };
-const when = t => new Date(t).toLocaleString([], {month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit'});
+const say = t => { $('msg').textContent = t || ''; };
+const when = t => {
+  const d = new Date(t), now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  return d.toLocaleString([], sameDay
+    ? {hour: 'numeric', minute: '2-digit'}
+    : {month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+};
 
 async function api(method, path, body) {
   const r = await fetch('/admin/api/' + path, {
     method, headers: {'x-admin-token': token, 'content-type': 'application/json'},
-    body: body ? JSON.stringify(body) : undefined });
+    body: body ? JSON.stringify(body) : undefined});
   if (r.status === 401) { signOut(); throw new Error('unauthorized'); }
   return r.json();
 }
@@ -97,26 +162,32 @@ function saveToken() {
 function signOut() {
   token = '';
   try { localStorage.removeItem('adminToken'); } catch (e) {}
-  $('app').hidden = true; $('login').hidden = false;
+  for (const id of ['hdr', 'menu', 'searchbar', 'main', 'composer']) $(id).hidden = true;
+  $('login').hidden = false;
 }
-function show(tab) {
-  $('inbox').hidden = tab !== 'inbox'; $('nums').hidden = tab !== 'nums';
-  $('search').hidden = tab !== 'inbox';
-  $('tabInbox').className = tab === 'inbox' ? 'on' : '';
-  $('tabNums').className = tab === 'nums' ? 'on' : '';
-  tab === 'inbox' ? refresh() : loadNums();
+function toggleMenu() { $('menu').hidden = !$('menu').hidden; }
+
+function show(t) {
+  tab = t; openKey = null;
+  $('menu').hidden = true;
+  $('tabInbox').className = t === 'inbox' ? 'on' : '';
+  $('tabNums').className = t === 'nums' ? 'on' : '';
+  t === 'inbox' ? refresh() : loadNums();
 }
 
 async function refresh() {
+  if (tab !== 'inbox') return loadNums();
   say('Loading…');
-  const [c, m, o] = await Promise.all([
-    api('GET', 'calls'), api('GET', 'messages'), api('GET', 'office-reply')]);
-  calls = c; msgs = m; officeText = o.text || '';
-  say('');
+  try {
+    const [c, m, o] = await Promise.all([
+      api('GET', 'calls'), api('GET', 'messages'), api('GET', 'office-reply')]);
+    calls = c; msgs = m; officeText = o.text || '';
+    say('');
+  } catch (e) { say('Could not load — ' + e.message); return; }
   render();
 }
 
-/** One section per contact, newest activity first. */
+/** One group per contact, newest activity first. */
 function groups() {
   const by = new Map();
   const add = (key, kind, item) => {
@@ -128,7 +199,7 @@ function groups() {
   };
   for (const c of calls) add(c.from, 'calls', c);
   for (const m of msgs) add(m.contact || m.from, 'msgs', m);
-  const q = $('search').value.trim().toLowerCase();
+  const q = ($('search').value || '').trim().toLowerCase();
   let list = [...by.values()];
   if (q) list = list.filter(g =>
     (g.name + ' ' + g.key).toLowerCase().includes(q) ||
@@ -138,23 +209,96 @@ function groups() {
   for (const g of list) {
     g.calls.sort((a, b) => b.ts.localeCompare(a.ts));
     g.msgs.sort((a, b) => a.ts.localeCompare(b.ts));
+    g.flagged = g.msgs.some(m => m.medical);
   }
   return list.sort((a, b) => b.last.localeCompare(a.last));
 }
 
+function callsHtml(g) {
+  if (!g.calls.length) return '<p class="muted">No calls.</p>';
+  return g.calls.map(c => `
+    <div class="item">
+      <div><span class="tag">${esc(c.line)}</span>
+        <span class="${esc(c.result)}">${esc(String(c.result).replace(/_/g, ' '))}</span>
+        ${c.voicemail ? `<button class="small" onclick="play('${esc(c.voicemail)}', this)">Voicemail</button>` : ''}
+        ${c.recording ? `<button class="small" onclick="play('${esc(c.recording)}', this)">Recording</button>` : ''}
+      </div>
+      <div class="muted">${when(c.ts)}</div>
+      ${c.vm_transcript ? `<div class="script">${esc(c.vm_transcript)}</div>` : ''}
+      ${c.transcript ? `<div class="script">${esc(c.transcript)}</div>` : ''}
+      ${c.error ? `<div class="muted" style="word-break:break-all">${esc(c.error)}</div>` : ''}
+    </div>`).join('');
+}
+
+function textsHtml(g) {
+  if (!g.msgs.length) return '<p class="muted">No texts.</p>';
+  return g.msgs.map(m => `
+    <div class="item ${m.dir === 'out' ? 'out' : ''}">
+      <div class="bubble">${esc(m.text) || '<i>no text</i>'}</div>
+      <div class="muted">${esc(m.line)} · ${when(m.ts)}${m.media ? ` · ${m.media} attachment(s)` : ''}</div>
+    </div>`).join('');
+}
+
+function listRow(g) {
+  const lastMsg = g.msgs[g.msgs.length - 1];
+  const preview = lastMsg ? (lastMsg.dir === 'out' ? 'You: ' : '') + (lastMsg.text || '')
+                          : `${g.calls.length} call${g.calls.length === 1 ? '' : 's'}`;
+  return `
+    <button class="row" onclick="openThread('${esc(g.key)}')">
+      <div class="grow">
+        <div class="ttl">${esc(g.name || g.key)}
+          ${g.flagged ? '<span class="tag flag">medical</span>' : ''}</div>
+        <div class="prev muted">${esc(preview)}</div>
+      </div>
+      <div class="muted" style="text-align:right">${when(g.last)}</div>
+    </button>`;
+}
+
 function render() {
+  if (tab !== 'inbox') return;
   const list = groups();
-  if (!list.length) { $('inbox').innerHTML = '<p class="muted">Nothing yet.</p>'; return; }
-  $('inbox').innerHTML = list.map(g => {
-    const flagged = g.msgs.some(m => m.medical);
-    const isOpen = open.has(g.key) || list.length <= 3;
+  const mobile = narrow.matches;
+
+  if (mobile && openKey) {
+    const g = list.find(x => x.key === openKey);
+    if (!g) { closeThread(); return; }
+    $('title').textContent = g.name || g.key;
+    $('back').hidden = false;
+    $('searchbar').hidden = true;
+    $('composer').hidden = !g.key.startsWith('+');
+    $('main').innerHTML = `
+      <div class="thread">
+        ${g.key.startsWith('+') ? `
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+            <button class="small" onclick="mark('${esc(g.key)}','allow')">Allow</button>
+            <button class="small" onclick="mark('${esc(g.key)}','block')">Block</button>
+            ${g.flagged && officeText ? `<button class="small" onclick="useOffice()">Office referral</button>` : ''}
+          </div>` : ''}
+        <div class="pane"><h3>Texts</h3>${textsHtml(g)}</div>
+        <div class="pane" style="margin-top:18px"><h3>Calls</h3>${callsHtml(g)}</div>
+      </div>`;
+    return;
+  }
+
+  $('title').textContent = 'Communications';
+  $('back').hidden = true;
+  $('searchbar').hidden = false;
+  $('composer').hidden = true;
+
+  if (!list.length) {
+    $('main').innerHTML = '<p class="muted" style="padding:16px">Nothing yet.</p>';
+    return;
+  }
+  if (mobile) { $('main').innerHTML = list.map(listRow).join(''); return; }
+
+  $('main').innerHTML = list.map(g => {
+    const isOpen = expanded.has(g.key) || list.length <= 3;
     return `
     <div class="contact">
-      <div class="chead" onclick="toggle('${esc(g.key)}')">
-        <div class="grow"><b>${esc(g.name || g.key)}</b>
+      <div class="chead" onclick="toggle('${esc(g.key)}')" style="cursor:pointer">
+        <div style="flex:1"><b>${esc(g.name || g.key)}</b>
           ${g.name ? `<span class="muted"> ${esc(g.key)}</span>` : ''}
-          ${flagged ? '<span class="tag flag">medical</span>' : ''}
-        </div>
+          ${g.flagged ? '<span class="tag flag">medical</span>' : ''}</div>
         <span class="muted">${g.calls.length} call${g.calls.length === 1 ? '' : 's'} ·
           ${g.msgs.length} text${g.msgs.length === 1 ? '' : 's'} · ${when(g.last)}</span>
         ${g.key.startsWith('+') ? `
@@ -163,55 +307,36 @@ function render() {
       </div>
       ${isOpen ? `
       <div class="panes">
-        <div class="pane">
-          <h3>Calls</h3>
-          ${g.calls.length ? g.calls.map(c => `
-            <div class="item">
-              <div><span class="tag">${esc(c.line)}</span>
-                <span class="${esc(c.result)}">${esc(String(c.result).replace(/_/g, ' '))}</span>
-                ${c.voicemail ? `<button class="small" onclick="play('${esc(c.voicemail)}', this)">Voicemail</button>` : ''}
-              </div>
-              <div class="muted">${when(c.ts)}</div>
-              ${c.recording ? `<button class="small" onclick="play('${esc(c.recording)}', this)">Recording</button>` : ''}
-              ${c.transcript ? `<div class="script">${esc(c.transcript)}</div>` : ''}
-              ${c.vm_transcript ? `<div class="script"><b>Voicemail:</b> ${esc(c.vm_transcript)}</div>` : ''}
-              ${c.error ? `<div class="muted" style="word-break:break-all">${esc(c.error)}</div>` : ''}
-            </div>`).join('') : '<p class="muted">No calls.</p>'}
-        </div>
-        <div class="pane">
-          <h3>Texts</h3>
-          ${g.msgs.length ? g.msgs.map(m => `
-            <div class="item ${m.dir === 'out' ? 'out' : ''}">
-              <div class="bubble">${esc(m.text) || '<i>no text</i>'}</div>
-              <div class="muted">${esc(m.line)} · ${when(m.ts)}${m.media ? ` · ${m.media} attachment(s)` : ''}</div>
-            </div>`).join('') : '<p class="muted">No texts.</p>'}
+        <div class="pane"><h3>Calls</h3>${callsHtml(g)}</div>
+        <div class="pane"><h3>Texts</h3>${textsHtml(g)}
           ${g.key.startsWith('+') ? `
             <div class="reply">
               <input id="r-${esc(g.key)}" placeholder="Reply…"
                      onkeydown="if(event.key==='Enter')sendText('${esc(g.key)}')">
               <button class="primary small" onclick="sendText('${esc(g.key)}')">Send</button>
             </div>
-            ${flagged && officeText ? `
-              <button class="small" style="margin-top:6px"
-                      onclick="useOffice('${esc(g.key)}')">Use office referral</button>` : ''}
-          ` : ''}
+            ${g.flagged && officeText ? `<button class="small" style="margin-top:7px"
+                onclick="useOffice('${esc(g.key)}')">Use office referral</button>` : ''}` : ''}
         </div>
       </div>` : ''}
     </div>`;
   }).join('');
 }
 
-function toggle(key) { open.has(key) ? open.delete(key) : open.add(key); render(); }
-function useOffice(key) { $('r-' + key).value = officeText; }
+function openThread(key) { openKey = key; render(); }
+function closeThread() { openKey = null; render(); }
+function toggle(key) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); }
+function useOffice(key) { (key ? $('r-' + key) : $('reply')).value = officeText; }
 
 async function sendText(key) {
-  const box = $('r-' + key);
+  const target = key || openKey;
+  const box = key ? $('r-' + key) : $('reply');
   const text = box.value.trim();
-  if (!text) return;
+  if (!target || !text) return;
   box.disabled = true;
   say('Sending…');
   try {
-    const r = await api('POST', 'send', {to: key, text});
+    const r = await api('POST', 'send', {to: target, text});
     say(r.ok ? r.note : 'Not sent — ' + r.note);
     if (r.ok) { box.value = ''; await refresh(); }
   } catch (e) { say('Not sent — ' + e.message); }
@@ -229,12 +354,21 @@ async function mark(number, status) {
   refresh();
 }
 async function loadNums() {
+  $('searchbar').hidden = true; $('composer').hidden = true; $('back').hidden = true;
+  $('title').textContent = 'Numbers';
   say('Loading…');
   const nums = await api('GET', 'numbers');
   say(nums.length + ' numbers');
-  $('numList').innerHTML = nums.map(n => `
-    <div class="item" style="display:flex;gap:10px;align-items:center">
-      <div style="flex:1"><b>${esc(n.name || n.number)}</b>
+  $('main').innerHTML = `
+    <div style="padding:12px;display:grid;gap:9px">
+      <textarea id="bulk" rows="4" placeholder="One per line: number, name&#10;609-555-0123, Dr. Smith"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="primary" onclick="bulkAdd('allow')">Add as allowed</button>
+        <button onclick="bulkAdd('block')">Add as blocked</button>
+      </div>
+    </div>` + nums.map(n => `
+    <div class="row">
+      <div class="grow"><div class="ttl">${esc(n.name || n.number)}</div>
         <div class="muted">${esc(n.number)} · ${esc(n.status)}</div></div>
       <button class="small" onclick="removeNum('${esc(n.number)}')">Remove</button>
     </div>`).join('');
@@ -247,17 +381,37 @@ async function bulkAdd(status) {
   });
   if (!numbers.length) return;
   const r = await api('POST', 'numbers', {numbers});
-  $('bulk').value = (r.skipped || []).join('\n');
+  const skipped = r.skipped || [];
   await loadNums();
-  say(`Saved ${r.saved}` + (r.skipped.length ? `, ${r.skipped.length} not recognised (left in the box)` : ''));
+  $('bulk').value = skipped.join('\n');
+  say(`Saved ${r.saved}` + (skipped.length ? `, ${skipped.length} not recognised (left in the box)` : ''));
 }
 async function removeNum(number) {
   await api('DELETE', 'numbers?number=' + encodeURIComponent(number));
   loadNums();
 }
+
+// Follow the screen: rotating a phone, or dragging a desktop window narrow,
+// switches between the list-and-thread layout and the side-by-side one.
+narrow.addEventListener('change', render);
+
+// Quietly refresh while the page is in the foreground and nothing is half-typed.
+setInterval(() => {
+  if (document.visibilityState !== 'visible' || tab !== 'inbox') return;
+  const el = document.activeElement;
+  if (el && el.tagName === 'INPUT' && el.value) return;
+  refresh();
+}, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && tab === 'inbox') refresh();
+});
+
 function start() {
   if (!token) { $('login').hidden = false; return; }
-  $('login').hidden = true; $('app').hidden = false; show('inbox');
+  $('login').hidden = true;
+  $('hdr').hidden = false;
+  $('main').hidden = false;
+  show('inbox');
 }
 start();
 </script>

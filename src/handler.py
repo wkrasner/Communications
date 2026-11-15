@@ -683,6 +683,22 @@ def lambda_handler(event, context):
             print(f"gateway error: {e!r}")
         return respond(200, {"ok": True})
 
+    if path == "/manifest.webmanifest" and method == "GET":
+        # Lets Android install the panel to the home screen as an app.
+        return respond(200, {
+            "name": "Communications", "short_name": "Comms",
+            "start_url": "/admin", "scope": "/admin", "display": "standalone",
+            "background_color": "#ffffff", "theme_color": "#2563eb",
+            "icons": [{
+                "src": ("data:image/svg+xml,"
+                        "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E"
+                        "%3Crect width='192' height='192' rx='40' fill='%232563eb'/%3E"
+                        "%3Ctext x='96' y='130' font-size='104' text-anchor='middle'"
+                        " fill='white' font-family='sans-serif'%3EC%3C/text%3E%3C/svg%3E"),
+                "sizes": "192x192", "type": "image/svg+xml", "purpose": "any",
+            }],
+        }, "application/manifest+json")
+
     if path == "/admin" and method == "GET":
         here = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(here, "admin.html"), encoding="utf-8") as f:

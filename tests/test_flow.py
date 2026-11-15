@@ -346,3 +346,23 @@ class GatewayAuth(Base):
         self.assertEqual(self.call(query={"k": "wrong"})["statusCode"], 401)
         self.assertEqual(self.call(headers={"x-gateway-secret": "wrong"})["statusCode"], 401)
         self.assertEqual(self.call()["statusCode"], 401)
+
+
+class Pages(Base):
+    def get(self, path):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": path, "headers": {}, "body": ""}, None)
+
+    def test_manifest_is_served_without_a_token(self):
+        r = self.get("/manifest.webmanifest")
+        self.assertEqual(r["statusCode"], 200)
+        m = json.loads(r["body"])
+        self.assertEqual((m["start_url"], m["display"]), ("/admin", "standalone"))
+        self.assertIn("manifest", r["headers"]["content-type"])
+
+    def test_admin_page_is_responsive_and_links_the_manifest(self):
+        body = self.get("/admin")["body"]
+        self.assertIn('rel="manifest"', body)
+        self.assertIn("max-width: 720px", body)       # layout switch
+        self.assertIn("min-width: 721px", body)       # side-by-side panes
+        self.assertIn("viewport-fit=cover", body)     # safe-area on phones

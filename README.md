@@ -8,7 +8,9 @@ Screens calls to two Telnyx numbers (one fed by the cell, one by Google Voice) b
 - Every call is logged with which line it came in on. Voicemail audio is saved to a private S3 bucket.
 - `/admin` is a small page for the allow/block lists, the call log and voicemail playback.
 
-Texts land in the same panel, grouped by contact: calls on the left, texts on the right, with a reply box.
+Texts land in the same panel, grouped by contact, with a reply box.
+
+The panel follows the screen it is on. On a phone it is a conversation list you tap into, with a thread view and a reply box pinned to the bottom; on a wide screen every contact is expanded with calls on the left and texts on the right. Rotating the phone or resizing the window switches between the two live. It is installable: open `/admin` in Chrome on Android, then "Add to Home screen", and it runs full-screen with its own icon. The inbox re-reads itself every 30 seconds while in the foreground, and pauses that while you are typing a reply.
 
 - **Cell texts** arrive from a gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number. Two apps are supported and the inbound handler accepts either payload shape: SimpApp's *SMS Gateway API* (on the Play Store, set `SMS_API_KEY`) and capcom6's *SMS Gateway* (sideloaded, set `SMS_GATEWAY_USER`/`SMS_GATEWAY_PASS`). The Play Store one relays through the vendor's Firebase; the sideloaded one talks straight to this Lambda.
   Neither app authenticates its webhook calls, so the shared secret rides in the URL as `?k=...`.
