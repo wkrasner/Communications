@@ -24,7 +24,7 @@ Create a private repo, upload these files keeping the folder structure, and add 
 
 | Secret | Value |
 |---|---|
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | Same deploy credentials as the Language-tutor repo |
+| `AWS_DEPLOY_ROLE_ARN` | Same value as in the Language-tutor repo (OIDC deploy role) |
 | `TELNYX_API_KEY` | Telnyx API key |
 | `TELNYX_PUBLIC_KEY` | Telnyx public key (base64 string) |
 | `ADMIN_TOKEN` | A long random string; this is the admin page password |
@@ -32,7 +32,7 @@ Create a private repo, upload these files keeping the folder structure, and add 
 | `CELL_DID` | Telnyx number the cell will forward to, as `+1XXXXXXXXXX` |
 | `GV_DID` | Telnyx number Google Voice will forward to, as `+1XXXXXXXXXX` |
 
-If the Language-tutor workflow signs in to AWS a different way (a role instead of keys), copy that step into `.github/workflows/deploy.yml`.
+The deploy signs in to AWS the same way the Language-tutor repo does: GitHub OIDC assuming a role, no stored keys. That role's trust policy almost certainly names only the Language-tutor repo, so add this repo to it before the first deploy. In IAM, open the role, then Trust relationships, and add `repo:wkrasner/Communications:*` alongside the existing `token.actions.githubusercontent.com:sub` entry. Without that, the deploy fails at the credentials step with "Not authorized to perform sts:AssumeRoleWithWebIdentity".
 
 ### 3. Deploy and connect
 1. Push to `main`. The workflow runs the tests, deploys, and prints `WebhookUrl` and `AdminUrl` in the "Show URLs" step.
