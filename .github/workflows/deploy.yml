@@ -38,27 +38,37 @@ jobs:
       - run: sam build
 
       - name: Deploy
+        env:
+          TelnyxApiKey: ${{ secrets.TELNYX_API_KEY }}
+          TelnyxPublicKey: ${{ secrets.TELNYX_PUBLIC_KEY }}
+          AdminToken: ${{ secrets.ADMIN_TOKEN }}
+          RingTarget: ${{ secrets.RING_TARGET }}
+          CellDid: ${{ secrets.CELL_DID }}
+          GvDid: ${{ secrets.GV_DID }}
+          CellNumber: ${{ secrets.CELL_NUMBER }}
+          OfficePhone: ${{ secrets.OFFICE_PHONE }}
+          GmailUser: ${{ secrets.GMAIL_USER }}
+          GmailAppPassword: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GatewaySecret: ${{ secrets.GATEWAY_SECRET }}
+          SmsGatewayUser: ${{ secrets.SMS_GATEWAY_USER }}
+          SmsGatewayPass: ${{ secrets.SMS_GATEWAY_PASS }}
         run: |
+          # An unset secret becomes an empty string, which SAM rejects outright.
+          # Omit those so the template's own default applies.
+          params=()
+          for key in TelnyxApiKey TelnyxPublicKey AdminToken RingTarget CellDid GvDid \
+                     CellNumber OfficePhone GmailUser GmailAppPassword GatewaySecret \
+                     SmsGatewayUser SmsGatewayPass; do
+            value="${!key}"
+            [ -n "$value" ] && params+=("$key=$value")
+          done
           sam deploy \
             --stack-name "$STACK" \
             --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "TelnyxApiKey=${{ secrets.TELNYX_API_KEY }}" \
-              "TelnyxPublicKey=${{ secrets.TELNYX_PUBLIC_KEY }}" \
-              "AdminToken=${{ secrets.ADMIN_TOKEN }}" \
-              "RingTarget=${{ secrets.RING_TARGET }}" \
-              "CellDid=${{ secrets.CELL_DID }}" \
-              "GvDid=${{ secrets.GV_DID }}" \
-              "CellNumber=${{ secrets.CELL_NUMBER }}" \
-              "OfficePhone=${{ secrets.OFFICE_PHONE }}" \
-              "GmailUser=${{ secrets.GMAIL_USER }}" \
-              "GmailAppPassword=${{ secrets.GMAIL_APP_PASSWORD }}" \
-              "GatewaySecret=${{ secrets.GATEWAY_SECRET }}" \
-              "SmsGatewayUser=${{ secrets.SMS_GATEWAY_USER }}" \
-              "SmsGatewayPass=${{ secrets.SMS_GATEWAY_PASS }}"
+            --parameter-overrides "${params[@]}"
 
       - name: Show URLs
         run: |
