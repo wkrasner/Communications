@@ -238,3 +238,61 @@ class Texting(Base):
                               "rawPath": "/gateway", "headers": {"x-gateway-secret": "wrong"},
                               "body": "{}"}, None)
         self.assertEqual(r["statusCode"], 401)
+
+
+class Transcription(Base):
+    def setUp(self):
+        super().setUp()
+        self.queued = []
+        self.audio = {}
+        h.save_voicemail = lambda url, key: self.audio.__setitem__(key, b"AUDIO")
+        h.read_audio = lambda key: self.audio[key]
+        h.transcribe_later = lambda pk, key, field: self.queued.append((pk, key, field))
+        h.transcribe = lambda audio, filename="a.mp3": "hello this is a test"
+
+    def answered_call(self):
+        self.db["NUM#+12155551234"] = {"status": "allow", "name": "Mom"}
+        self.inbound()
+        ring = self.last()[2]["client_state"]
+        self.ev("call.answered", ccid="B", state=ring)
+        return ring
+
+    def test_answered_call_is_not_recorded_by_default(self):
+        h.RECORD_CALLS = False
+        self.answered_call()
+        self.assertNotIn("record_start", [c[1] for c in self.cmds])
+
+    def test_answered_call_is_recorded_when_switched_on(self):
+        h.RECORD_CALLS = True
+        try:
+            self.answered_call()
+        finally:
+            h.RECORD_CALLS = False
+        ccid, action, body = self.last()
+        self.assertEqual((ccid, action), ("A", "record_start"))
+        self.assertEqual(self.db["CALL#S1"]["recording_kind"], "call")
+
+    def test_conversation_recording_is_stored_and_queued(self):
+        self.db["CALL#S1"] = {"pk": "CALL#S1", "recording_kind": "call"}
+        self.ev("call.recording.saved", recording_urls={"mp3": "https://x/r.mp3"})
+        self.assertEqual(self.db["CALL#S1"]["recording"], "calls/S1.mp3")
+        self.assertEqual(self.queued, [("CALL#S1", "calls/S1.mp3", "transcript")])
+
+    def test_voicemail_recording_is_stored_and_queued_separately(self):
+        self.db["CALL#S1"] = {"pk": "CALL#S1", "recording_kind": "voicemail"}
+        self.ev("call.recording.saved", recording_urls={"mp3": "https://x/v.mp3"})
+        self.assertEqual(self.db["CALL#S1"]["voicemail"], "voicemail/S1.mp3")
+        self.assertEqual(self.queued, [("CALL#S1", "voicemail/S1.mp3", "vm_transcript")])
+
+    def test_transcription_job_writes_the_text(self):
+        self.audio["voicemail/S1.mp3"] = b"AUDIO"
+        self.db["CALL#S1"] = {"pk": "CALL#S1"}
+        h.run_transcription({"pk": "CALL#S1", "key": "voicemail/S1.mp3", "field": "vm_transcript"})
+        self.assertEqual(self.db["CALL#S1"]["vm_transcript"], "hello this is a test")
+
+    def test_failed_transcription_leaves_a_marker_not_a_crash(self):
+        h.transcribe = lambda audio, filename="a.mp3": ""
+        self.audio["calls/S1.mp3"] = b"AUDIO"
+        self.db["CALL#S1"] = {"pk": "CALL#S1"}
+        h.run_transcription({"pk": "CALL#S1", "key": "calls/S1.mp3", "field": "transcript"})
+        self.assertEqual(self.db["CALL#S1"]["transcript"], "(no transcript)")

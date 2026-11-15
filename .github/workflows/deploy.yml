@@ -52,13 +52,15 @@ jobs:
           GatewaySecret: ${{ secrets.GATEWAY_SECRET }}
           SmsGatewayUser: ${{ secrets.SMS_GATEWAY_USER }}
           SmsGatewayPass: ${{ secrets.SMS_GATEWAY_PASS }}
+          OpenAiApiKey: ${{ secrets.OPENAI_API_KEY }}
+          RecordCalls: ${{ vars.RECORD_CALLS }}
         run: |
           # An unset secret becomes an empty string, which SAM rejects outright.
           # Omit those so the template's own default applies.
           params=()
           for key in TelnyxApiKey TelnyxPublicKey AdminToken RingTarget CellDid GvDid \
                      CellNumber OfficePhone GmailUser GmailAppPassword GatewaySecret \
-                     SmsGatewayUser SmsGatewayPass; do
+                     SmsGatewayUser SmsGatewayPass OpenAiApiKey RecordCalls; do
             value="${!key}"
             [ -n "$value" ] && params+=("$key=$value")
           done

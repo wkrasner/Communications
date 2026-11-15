@@ -32,6 +32,8 @@
   .item:last-child { border-bottom: 0; }
   .out { text-align: right; }
   .out .bubble { background: var(--accent); color: #fff; }
+  .script { margin-top: 5px; padding: 6px 9px; border-left: 2px solid var(--line);
+            font-size: 13.5px; white-space: pre-wrap; opacity: .9; }
   .bubble { display: inline-block; padding: 5px 10px; border-radius: 12px;
             background: var(--soft); max-width: 85%; text-align: left; white-space: pre-wrap; }
   .reply { display: flex; gap: 6px; margin-top: 9px; }
@@ -131,7 +133,8 @@ function groups() {
   if (q) list = list.filter(g =>
     (g.name + ' ' + g.key).toLowerCase().includes(q) ||
     g.msgs.some(m => (m.text || '').toLowerCase().includes(q)) ||
-    g.calls.some(c => (c.result || '').toLowerCase().includes(q)));
+    g.calls.some(c => ((c.result || '') + ' ' + (c.transcript || '') + ' ' +
+                       (c.vm_transcript || '')).toLowerCase().includes(q)));
   for (const g of list) {
     g.calls.sort((a, b) => b.ts.localeCompare(a.ts));
     g.msgs.sort((a, b) => a.ts.localeCompare(b.ts));
@@ -169,6 +172,9 @@ function render() {
                 ${c.voicemail ? `<button class="small" onclick="play('${esc(c.voicemail)}', this)">Voicemail</button>` : ''}
               </div>
               <div class="muted">${when(c.ts)}</div>
+              ${c.recording ? `<button class="small" onclick="play('${esc(c.recording)}', this)">Recording</button>` : ''}
+              ${c.transcript ? `<div class="script">${esc(c.transcript)}</div>` : ''}
+              ${c.vm_transcript ? `<div class="script"><b>Voicemail:</b> ${esc(c.vm_transcript)}</div>` : ''}
               ${c.error ? `<div class="muted" style="word-break:break-all">${esc(c.error)}</div>` : ''}
             </div>`).join('') : '<p class="muted">No calls.</p>'}
         </div>

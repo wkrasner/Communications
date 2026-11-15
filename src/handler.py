@@ -38,6 +38,12 @@ GATEWAY_PASS = os.environ.get("SMS_GATEWAY_PASS", "")
 GATEWAY_API = "https://api.sms-gate.app/3rdparty/v1/messages"
 OFFICE_PHONE = os.environ.get("OFFICE_PHONE", "")
 CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
+OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_URL = "https://api.openai.com/v1/audio/transcriptions"
+OPENAI_MODEL = os.environ.get("TRANSCRIBE_MODEL", "whisper-1")
+# Answered calls are recorded only when this is on. Recording consent law
+# varies by state, so it is a deliberate switch rather than a default.
+RECORD_CALLS = os.environ.get("RECORD_CALLS", "off").lower() in ("on", "true", "1")
 # Telnyx DID -> label for the line that forwards to it
 LINES = {
     os.environ.get("CELL_DID", ""): "Cell",
@@ -116,6 +122,54 @@ def voicemail_url(key):
     return s3().generate_presigned_url(
         "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=600
     )
+
+
+def read_audio(key):
+    return s3().get_object(Bucket=BUCKET, Key=key)["Body"].read()
+
+
+def transcribe(audio, filename="audio.mp3"):
+    """Whisper transcript of recorded audio. Returns '' rather than raising."""
+    if not OPENAI_KEY:
+        return ""
+    boundary = "----communications" + base64.urlsafe_b64encode(os.urandom(9)).decode()
+    parts = []
+    for name, value in (("model", OPENAI_MODEL), ("response_format", "text")):
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n".encode()
+        )
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+        f'filename="{filename}"\r\nContent-Type: audio/mpeg\r\n\r\n'.encode()
+    )
+    parts.append(audio)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        OPENAI_URL, data=b"".join(parts), method="POST",
+        headers={"Authorization": f"Bearer {OPENAI_KEY}",
+                 "Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        with urllib.request.urlopen(req, timeout=110) as r:
+            return r.read().decode("utf-8", "replace").strip()
+    except urllib.error.HTTPError as e:
+        print(f"transcribe failed {e.code}: {e.read()[:300]!r}")
+    except Exception as e:
+        print(f"transcribe error: {e}")
+    return ""
+
+
+def transcribe_later(pk, key, field):
+    """Hand the transcription to a second invocation so the webhook returns now."""
+    try:
+        import boto3
+        boto3.client("lambda").invoke(
+            FunctionName=os.environ["AWS_LAMBDA_FUNCTION_NAME"],
+            InvocationType="Event",
+            Payload=json.dumps({"transcribe": {"pk": pk, "key": key, "field": field}}).encode(),
+        )
+    except Exception as e:
+        print(f"could not queue transcription: {e}")
 
 
 # ---------- helpers ----------
@@ -284,7 +338,16 @@ def on_answered(p, state, event_id):
     elif s == "vm":
         start_voicemail_greeting(ccid, event_id)
     elif s == "ring":
-        db_update(f"CALL#{p['call_session_id']}", answered=True, result="answered")
+        pk = f"CALL#{p['call_session_id']}"
+        db_update(pk, answered=True, result="answered")
+        if RECORD_CALLS:
+            # Record on leg A so both sides are captured.
+            a_ccid = state.get("a")
+            if a_ccid:
+                db_update(pk, recording_kind="call")
+                telnyx(a_ccid, "record_start", {
+                    "format": "mp3", "channels": "dual", "trim": "trim-silence",
+                }, event_id)
 
 
 def on_gather_ended(p, state, event_id):
@@ -312,6 +375,7 @@ def on_gather_ended(p, state, event_id):
 def on_speak_ended(p, state, event_id):
     if state.get("s") != "vmrec":
         return
+    db_update(f"CALL#{p['call_session_id']}", recording_kind="voicemail")
     telnyx(p["call_control_id"], "record_start", {
         "format": "mp3",
         "channels": "single",
@@ -344,9 +408,25 @@ def on_recording_saved(p, event_id):
     if not url:
         return
     session = p["call_session_id"]
-    key = f"voicemail/{session}.mp3"
-    save_voicemail(url, key)
-    db_update(f"CALL#{session}", voicemail=key, vm_ts=now_iso())
+    pk = f"CALL#{session}"
+    kind = (db_get(pk) or {}).get("recording_kind", "voicemail")
+    if kind == "call":
+        key = f"calls/{session}.mp3"
+        save_voicemail(url, key)
+        db_update(pk, recording=key, rec_ts=now_iso(), transcript="(transcribing…)")
+        transcribe_later(pk, key, "transcript")
+    else:
+        key = f"voicemail/{session}.mp3"
+        save_voicemail(url, key)
+        db_update(pk, voicemail=key, vm_ts=now_iso(), vm_transcript="(transcribing…)")
+        transcribe_later(pk, key, "vm_transcript")
+
+
+def run_transcription(job):
+    pk, key, field = job.get("pk"), job.get("key"), job.get("field", "transcript")
+    text = transcribe(read_audio(key), os.path.basename(key))
+    db_update(pk, **{field: text or "(no transcript)"})
+    return {"pk": pk, "chars": len(text)}
 
 
 # Words that suggest the text is a clinical question rather than ordinary chat.
@@ -548,9 +628,11 @@ def on_gateway_post(body):
 
 
 def lambda_handler(event, context):
-    # EventBridge tick rather than an HTTP request.
+    # Background invocations rather than HTTP requests.
     if event.get("poll"):
         return poll_gmail()
+    if event.get("transcribe"):
+        return run_transcription(event["transcribe"])
 
     http = event.get("requestContext", {}).get("http", {})
     method = http.get("method", "")

@@ -16,6 +16,8 @@ Parameters:
   GatewaySecret: { Type: String, Default: '', NoEcho: true }
   SmsGatewayUser: { Type: String, Default: '' }
   SmsGatewayPass: { Type: String, Default: '', NoEcho: true }
+  OpenAiApiKey: { Type: String, Default: '', NoEcho: true }
+  RecordCalls: { Type: String, Default: 'off', AllowedValues: ['on', 'off'] }
 
 Resources:
   Api:
@@ -63,7 +65,7 @@ Resources:
       Handler: handler.lambda_handler
       Runtime: python3.12
       Architectures: [x86_64]
-      Timeout: 25
+      Timeout: 120
       MemorySize: 256
       Environment:
         Variables:
@@ -82,9 +84,17 @@ Resources:
           GATEWAY_SECRET: !Ref GatewaySecret
           SMS_GATEWAY_USER: !Ref SmsGatewayUser
           SMS_GATEWAY_PASS: !Ref SmsGatewayPass
+          OPENAI_API_KEY: !Ref OpenAiApiKey
+          RECORD_CALLS: !Ref RecordCalls
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref Table }
         - S3CrudPolicy: { BucketName: !Ref VoicemailBucket }
+        # Recording transcription runs in a second, asynchronous invocation so
+        # the Telnyx webhook is not held open while Whisper works.
+        - Statement:
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-*'
       Events:
         Any:
           Type: HttpApi
