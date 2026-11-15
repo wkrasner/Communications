@@ -1,4 +1,5 @@
 """Simulates Telnyx webhook sequences against the handler with fake storage and a fake Telnyx."""
+import json
 import os
 import sys
 import unittest
@@ -9,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import handler as h  # noqa: E402
 
 
-class Flow(unittest.TestCase):
+class Base(unittest.TestCase):
     def setUp(self):
         self.db, self.cmds, self.saved = {}, [], []
         self.fail_actions = set()
@@ -39,6 +40,8 @@ class Flow(unittest.TestCase):
     def allow(self, num, name="Mom"):
         self.db[f"NUM#{num}"] = {"pk": f"NUM#{num}", "status": "allow", "name": name}
 
+
+class Flow(Base):
     def test_blocked_is_rejected(self):
         self.db["NUM#+12155551234"] = {"status": "block"}
         self.inbound()
@@ -167,3 +170,71 @@ class Flow(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Texting(Base):
+    def setUp(self):
+        super().setUp()
+        h.OFFICE_PHONE = "609-555-0100"
+        self.sent = []
+        h.GATEWAY_USER = h.GATEWAY_PASS = "x"
+
+    def test_gateway_webhook_stores_cell_text(self):
+        h.on_gateway_post({"id": "g1", "payload": {
+            "phoneNumber": "+12155551234", "message": "running late"}})
+        m = [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"][0]
+        self.assertEqual((m["contact"], m["line"], m["src"], m["dir"]),
+                         ("+12155551234", "Cell", "cell", "in"))
+        self.assertNotIn("medical", m)
+
+    def test_medical_text_is_flagged_and_reply_offered(self):
+        h.on_gateway_post({"id": "g2", "payload": {
+            "phoneNumber": "+12155551234", "message": "my chest hurts, can I get a refill"}})
+        m = [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"][0]
+        self.assertTrue(m["medical"])
+        self.assertIn("609-555-0100", h.office_reply())
+        self.assertIn("911", h.office_reply())
+
+    def test_ordinary_text_is_not_flagged(self):
+        for body in ["dinner at 7?", "the dog is out back", "happy birthday!"]:
+            self.db.clear()
+            h.on_gateway_post({"id": "g", "payload": {"phoneNumber": "+1215555" + "1234", "message": body}})
+            m = [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"][0]
+            self.assertNotIn("medical", m, body)
+
+    def test_reply_routes_to_google_voice_when_thread_came_from_there(self):
+        h.store_message("gv-1", "+12155551234", "", "GV", "hi", src="gv",
+                        relay="abc@txt.voice.google.com")
+        h.GMAIL_USER, h.GMAIL_APP_PASSWORD = "me@gmail.com", "pw"
+        import types, sys
+        fake = types.ModuleType("gvmail")
+        fake.send = lambda u, p, relay, text: self.sent.append((relay, text))
+        sys.modules["gvmail"] = fake
+        ok, note = h.send_text("+12155551234", "on my way")
+        self.assertTrue(ok, note)
+        self.assertEqual(self.sent, [("abc@txt.voice.google.com", "on my way")])
+        out = [i for i in self.db.values() if i.get("dir") == "out"][0]
+        self.assertEqual((out["src"], out["line"]), ("gv", "GV"))
+
+    def test_reply_routes_to_cell_gateway_otherwise(self):
+        h.store_message("c-1", "+12155551234", "", "Cell", "hi", src="cell")
+        calls, real = [], h.urllib.request.urlopen
+
+        def fake(req, timeout=0):
+            calls.append(req)
+            return type("R", (), {"read": lambda s: b"{}", "__enter__": lambda s: s,
+                                  "__exit__": lambda s, *a: None})()
+        h.urllib.request.urlopen = fake
+        try:
+            ok, note = h.send_text("+12155551234", "ok")
+        finally:
+            h.urllib.request.urlopen = real
+        self.assertTrue(ok, note)
+        self.assertEqual(json.loads(calls[0].data)["phoneNumbers"], ["+12155551234"])
+
+    def test_gateway_endpoint_rejects_bad_secret(self):
+        h.GATEWAY_SECRET = "right"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/gateway", "headers": {"x-gateway-secret": "wrong"},
+                              "body": "{}"}, None)
+        self.assertEqual(r["statusCode"], 401)

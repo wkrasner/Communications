@@ -9,6 +9,13 @@ Parameters:
   RingTarget: { Type: String, Description: 'sip:USERNAME@sip.telnyx.com' }
   CellDid: { Type: String, Description: 'Telnyx number the cell forwards to, +1XXXXXXXXXX' }
   GvDid: { Type: String, Description: 'Telnyx number Google Voice forwards to, +1XXXXXXXXXX' }
+  CellNumber: { Type: String, Default: '', Description: 'Your real cell, +1XXXXXXXXXX' }
+  OfficePhone: { Type: String, Default: '', Description: 'Office number offered for medical texts' }
+  GmailUser: { Type: String, Default: '' }
+  GmailAppPassword: { Type: String, Default: '', NoEcho: true }
+  GatewaySecret: { Type: String, Default: '', NoEcho: true }
+  SmsGatewayUser: { Type: String, Default: '' }
+  SmsGatewayPass: { Type: String, Default: '', NoEcho: true }
 
 Resources:
   Api:
@@ -68,6 +75,13 @@ Resources:
           GV_DID: !Ref GvDid
           TABLE_NAME: !Ref Table
           VOICEMAIL_BUCKET: !Ref VoicemailBucket
+          CELL_NUMBER: !Ref CellNumber
+          OFFICE_PHONE: !Ref OfficePhone
+          GMAIL_USER: !Ref GmailUser
+          GMAIL_APP_PASSWORD: !Ref GmailAppPassword
+          GATEWAY_SECRET: !Ref GatewaySecret
+          SMS_GATEWAY_USER: !Ref SmsGatewayUser
+          SMS_GATEWAY_PASS: !Ref SmsGatewayPass
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref Table }
         - S3CrudPolicy: { BucketName: !Ref VoicemailBucket }
@@ -78,6 +92,11 @@ Resources:
             ApiId: !Ref Api
             Path: /{proxy+}
             Method: ANY
+        PollGmail:
+          Type: Schedule
+          Properties:
+            Schedule: 'rate(1 minute)'
+            Input: '{"poll": true}'
 
 Outputs:
   WebhookUrl:

@@ -8,7 +8,13 @@ Screens calls to two Telnyx numbers (one fed by the cell, one by Google Voice) b
 - Every call is logged with which line it came in on. Voicemail audio is saved to a private S3 bucket.
 - `/admin` is a small page for the allow/block lists, the call log and voicemail playback.
 
-Not built yet: text ingest (Google Voice via Gmail, cell via the SMS gateway app), the unified panel, voicemail transcripts, the AI screener, and the medical-text office referral.
+Texts land in the same panel, grouped by contact: calls on the left, texts on the right, with a reply box.
+
+- **Cell texts** arrive from the SMS Gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number.
+- **Google Voice texts** arrive by Gmail: Google Voice forwards each text to the account's email, a once-a-minute IMAP poll picks it up, and a reply is sent over SMTP to Google's relay address, which Google turns back into a text from the Google Voice number.
+- **Medical-sounding texts** are flagged, and a one-tap button fills the reply box with a message pointing the sender at the office. Nothing is sent automatically.
+
+Not built yet: voicemail transcripts, the AI screener, scheduled/queued texts.
 
 ## Setup
 

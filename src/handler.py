@@ -30,6 +30,14 @@ VOICE = os.environ.get("VOICE", "female")
 LANGUAGE = os.environ.get("LANGUAGE", "en-US")
 TABLE_NAME = os.environ.get("TABLE_NAME", "")
 BUCKET = os.environ.get("VOICEMAIL_BUCKET", "")
+GMAIL_USER = os.environ.get("GMAIL_USER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET", "")
+GATEWAY_USER = os.environ.get("SMS_GATEWAY_USER", "")
+GATEWAY_PASS = os.environ.get("SMS_GATEWAY_PASS", "")
+GATEWAY_API = "https://api.sms-gate.app/3rdparty/v1/messages"
+OFFICE_PHONE = os.environ.get("OFFICE_PHONE", "")
+CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
 # Telnyx DID -> label for the line that forwards to it
 LINES = {
     os.environ.get("CELL_DID", ""): "Cell",
@@ -341,21 +349,110 @@ def on_recording_saved(p, event_id):
     db_update(f"CALL#{session}", voicemail=key, vm_ts=now_iso())
 
 
+# Words that suggest the text is a clinical question rather than ordinary chat.
+MEDICAL = re.compile(
+    r"(?i)\b(pain|hurts?|fever|chest|breath(?:ing|less)?|dizzy|nause|vomit|"
+    r"rash|swell(?:ing|ed)?|infect|antibiotic|refill|prescription|pharmacy|"
+    r"\brx\b|dose|dosage|mg\b|blood pressure|\bbp\b|sugar|glucose|insulin|"
+    r"lab(?:s| work| result)|x-?ray|mri|\bct\b|scan|biopsy|appointment|"
+    r"referral|symptom|diagnos|bleeding|headache|cough|sore throat|"
+    r"urgent care|\ber\b|emergency room|sick|injur)"
+)
+
+
+def office_reply():
+    if not OFFICE_PHONE:
+        return ""
+    return (
+        f"For anything medical, please call or text the office at {OFFICE_PHONE} "
+        "so it goes in your chart and reaches the right person. "
+        "If this is an emergency, call 911."
+    )
+
+
+def store_message(ident, caller, did, line, text, direction="in", src="telnyx",
+                  relay="", name="", media=0):
+    """One text, inbound or outbound, in the thread for `caller`."""
+    caller = normalize(caller) or caller or "unknown"
+    entry = db_get(f"NUM#{caller}") if caller.startswith("+") else None
+    ts = now_iso()
+    item = {
+        "pk": f"MSG#{ident}", "sk": "META", "gsi1pk": "MSGS", "gsi1sk": ts,
+        "ts": ts, "contact": caller, "from": caller,
+        "name": (entry or {}).get("name") or name, "line": line, "did": did,
+        "dir": direction, "src": src, "text": (text or "")[:1500], "media": media,
+    }
+    if relay:
+        item["relay"] = relay
+    if direction == "in" and text and MEDICAL.search(text):
+        item["medical"] = True
+    db_put(item)
+    return item
+
+
+def latest_thread_route(contact):
+    """How to reach `contact`: the most recent inbound message decides."""
+    msgs = [m for m in db_list("MSGS", 400) if m.get("contact") == contact]
+    msgs.sort(key=lambda m: m.get("ts", ""), reverse=True)
+    for m in msgs:
+        if m.get("dir") == "in":
+            return m.get("src", "cell"), m.get("relay", "")
+    return ("cell", "")
+
+
+def send_text(contact, text):
+    """Send as whichever of his numbers the thread belongs to."""
+    src, relay = latest_thread_route(contact)
+    if src == "gv":
+        if not (GMAIL_USER and GMAIL_APP_PASSWORD and relay):
+            return False, "no Gmail credentials or no relay address for this thread"
+        import gvmail
+        gvmail.send(GMAIL_USER, GMAIL_APP_PASSWORD, relay, text)
+        store_message(f"out-{now_iso()}", contact, "", "GV", text,
+                      direction="out", src="gv", relay=relay)
+        return True, "sent from Google Voice"
+    if not (GATEWAY_USER and GATEWAY_PASS):
+        return False, "no SMS gateway credentials"
+    body = json.dumps({"message": text, "phoneNumbers": [contact]}).encode()
+    auth = base64.b64encode(f"{GATEWAY_USER}:{GATEWAY_PASS}".encode()).decode()
+    req = urllib.request.Request(GATEWAY_API, data=body, method="POST", headers={
+        "Authorization": f"Basic {auth}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        return False, f"gateway {e.code}: {e.read()[:200].decode('utf-8', 'replace')}"
+    except Exception as e:
+        return False, f"gateway error: {e}"
+    store_message(f"out-{now_iso()}", contact, "", "Cell", text,
+                  direction="out", src="cell")
+    return True, "sent from your cell"
+
+
+def poll_gmail():
+    """Pull new Google Voice notification emails into the message store."""
+    if not (GMAIL_USER and GMAIL_APP_PASSWORD):
+        return {"polled": 0, "note": "no Gmail credentials set"}
+    import gvmail
+    cursor = db_get("STATE#gvuid") or {}
+    since = int(cursor.get("uid", 0))
+    msgs, highest = gvmail.fetch(GMAIL_USER, GMAIL_APP_PASSWORD, since)
+    for m in msgs:
+        store_message(f"gv-{m['uid']}", m["from"], os.environ.get("GV_DID", ""),
+                      "GV", m["text"], src="gv", relay=m["relay"], name=m["name"])
+    if highest > since:
+        db_put({"pk": "STATE#gvuid", "sk": "META", "uid": highest})
+    return {"polled": len(msgs), "uid": highest}
+
+
 def on_message_received(p):
     """Store an inbound SMS/MMS so it shows in the panel."""
     frm = p.get("from") or {}
-    caller = normalize(frm.get("phone_number", ""))
     dids = [t.get("phone_number", "") for t in (p.get("to") or [])]
     did = next((d for d in dids if d in LINES), dids[0] if dids else "")
-    entry = db_get(f"NUM#{caller}") if caller else None
-    ts = now_iso()
-    db_put({
-        "pk": f"MSG#{p.get('id', ts)}", "sk": "META", "gsi1pk": "MSGS", "gsi1sk": ts,
-        "ts": ts, "from": caller or frm.get("phone_number", "unknown"),
-        "name": (entry or {}).get("name", ""), "line": LINES.get(did, "Other"), "did": did,
-        "text": (p.get("text") or "")[:1500],
-        "media": len(p.get("media") or []),
-    })
+    store_message(p.get("id", now_iso()), frm.get("phone_number", ""), did,
+                  LINES.get(did, "Other"), p.get("text", ""), src="telnyx",
+                  media=len(p.get("media") or []))
 
 
 def handle_webhook(body):
@@ -390,7 +487,18 @@ def admin_api(method, path, query, body):
     if path == "/admin/api/calls" and method == "GET":
         return 200, [clean(i) for i in db_list("CALLS", 100)]
     if path == "/admin/api/messages" and method == "GET":
-        return 200, [clean(i) for i in db_list("MSGS", 100)]
+        return 200, [clean(i) for i in db_list("MSGS", 300)]
+    if path == "/admin/api/send" and method == "POST":
+        to = normalize(body.get("to"))
+        text = (body.get("text") or "").strip()
+        if not to or not text:
+            return 400, {"error": "need a number and some text"}
+        ok, note = send_text(to, text)
+        return (200 if ok else 502), {"ok": ok, "note": note}
+    if path == "/admin/api/office-reply" and method == "GET":
+        return 200, {"text": office_reply()}
+    if path == "/admin/api/poll" and method == "POST":
+        return 200, poll_gmail()
     if path == "/admin/api/numbers" and method == "GET":
         return 200, [clean(i) for i in db_list("NUMS", 1000)]
     if path == "/admin/api/numbers" and method == "POST":
@@ -429,7 +537,21 @@ def respond(code, body, content_type="application/json"):
     }
 
 
+def on_gateway_post(body):
+    """Webhook from the SMS Gateway app on the Android phone (sms:received)."""
+    p = body.get("payload") or {}
+    text = p.get("message", "")
+    sender = p.get("phoneNumber", "")
+    media = len(p.get("attachments") or p.get("media") or [])
+    store_message(body.get("id") or p.get("messageId") or now_iso(),
+                  sender, CELL_NUMBER, "Cell", text, src="cell", media=media)
+
+
 def lambda_handler(event, context):
+    # EventBridge tick rather than an HTTP request.
+    if event.get("poll"):
+        return poll_gmail()
+
     http = event.get("requestContext", {}).get("http", {})
     method = http.get("method", "")
     path = event.get("rawPath", "")
@@ -444,6 +566,16 @@ def lambda_handler(event, context):
             handle_webhook(json.loads(raw_bytes))
         except Exception as e:  # always 200 so Telnyx does not retry into a live call
             print(f"webhook error: {e!r}")
+        return respond(200, {"ok": True})
+
+    if path == "/gateway" and method == "POST":
+        token = headers.get("x-gateway-secret", "")
+        if not GATEWAY_SECRET or not hmac.compare_digest(token, GATEWAY_SECRET):
+            return respond(401, {"error": "unauthorized"})
+        try:
+            on_gateway_post(json.loads(raw_bytes))
+        except Exception as e:
+            print(f"gateway error: {e!r}")
         return respond(200, {"ok": True})
 
     if path == "/admin" and method == "GET":

@@ -51,7 +51,14 @@ jobs:
               "AdminToken=${{ secrets.ADMIN_TOKEN }}" \
               "RingTarget=${{ secrets.RING_TARGET }}" \
               "CellDid=${{ secrets.CELL_DID }}" \
-              "GvDid=${{ secrets.GV_DID }}"
+              "GvDid=${{ secrets.GV_DID }}" \
+              "CellNumber=${{ secrets.CELL_NUMBER }}" \
+              "OfficePhone=${{ secrets.OFFICE_PHONE }}" \
+              "GmailUser=${{ secrets.GMAIL_USER }}" \
+              "GmailAppPassword=${{ secrets.GMAIL_APP_PASSWORD }}" \
+              "GatewaySecret=${{ secrets.GATEWAY_SECRET }}" \
+              "SmsGatewayUser=${{ secrets.SMS_GATEWAY_USER }}" \
+              "SmsGatewayPass=${{ secrets.SMS_GATEWAY_PASS }}"
 
       - name: Show URLs
         run: |
