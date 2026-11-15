@@ -10,7 +10,8 @@ Screens calls to two Telnyx numbers (one fed by the cell, one by Google Voice) b
 
 Texts land in the same panel, grouped by contact: calls on the left, texts on the right, with a reply box.
 
-- **Cell texts** arrive from the SMS Gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number.
+- **Cell texts** arrive from a gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number. Two apps are supported and the inbound handler accepts either payload shape: SimpApp's *SMS Gateway API* (on the Play Store, set `SMS_API_KEY`) and capcom6's *SMS Gateway* (sideloaded, set `SMS_GATEWAY_USER`/`SMS_GATEWAY_PASS`). The Play Store one relays through the vendor's Firebase; the sideloaded one talks straight to this Lambda.
+  Neither app authenticates its webhook calls, so the shared secret rides in the URL as `?k=...`.
 - **Google Voice texts** arrive by Gmail: Google Voice forwards each text to the account's email, a once-a-minute IMAP poll picks it up, and a reply is sent over SMTP to Google's relay address, which Google turns back into a text from the Google Voice number.
 - **Medical-sounding texts** are flagged, and a one-tap button fills the reply box with a message pointing the sender at the office. Nothing is sent automatically.
 

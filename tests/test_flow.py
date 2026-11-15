@@ -187,6 +187,37 @@ class Texting(Base):
                          ("+12155551234", "Cell", "cell", "in"))
         self.assertNotIn("medical", m)
 
+    def test_simpapp_payload_shape_is_accepted(self):
+        h.on_gateway_post({"type": "incoming_sms", "sender": "+12155551234",
+                           "message": "running late"})
+        m = [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"][0]
+        self.assertEqual((m["contact"], m["src"], m["text"]),
+                         ("+12155551234", "cell", "running late"))
+
+    def test_delivery_status_webhook_is_ignored(self):
+        h.on_gateway_post({"type": "delivery_status", "id": "x", "status": "delivered"})
+        self.assertEqual([i for i in self.db.values() if i.get("gsi1pk") == "MSGS"], [])
+
+    def test_send_uses_bearer_api_when_key_is_set(self):
+        h.store_message("c-1", "+12155551234", "", "Cell", "hi", src="cell")
+        h.SMS_API_KEY = "KEY"
+        calls, real = [], h.urllib.request.urlopen
+
+        def fake(req, timeout=0):
+            calls.append(req)
+            return type("R", (), {"read": lambda s: b"{}", "__enter__": lambda s: s,
+                                  "__exit__": lambda s, *a: None})()
+        h.urllib.request.urlopen = fake
+        try:
+            ok, note = h.send_text("+12155551234", "ok")
+        finally:
+            h.urllib.request.urlopen = real
+            h.SMS_API_KEY = ""
+        self.assertTrue(ok, note)
+        self.assertEqual(json.loads(calls[0].data),
+                         {"phoneNumber": "+12155551234", "message": "ok"})
+        self.assertEqual(calls[0].headers["Authorization"], "Bearer KEY")
+
     def test_medical_text_is_flagged_and_reply_offered(self):
         h.on_gateway_post({"id": "g2", "payload": {
             "phoneNumber": "+12155551234", "message": "my chest hurts, can I get a refill"}})

@@ -52,6 +52,7 @@ jobs:
           GatewaySecret: ${{ secrets.GATEWAY_SECRET }}
           SmsGatewayUser: ${{ secrets.SMS_GATEWAY_USER }}
           SmsGatewayPass: ${{ secrets.SMS_GATEWAY_PASS }}
+          SmsApiKey: ${{ secrets.SMS_API_KEY }}
           OpenAiApiKey: ${{ secrets.OPENAI_API_KEY }}
           RecordCalls: ${{ vars.RECORD_CALLS }}
         run: |
@@ -60,7 +61,7 @@ jobs:
           params=()
           for key in TelnyxApiKey TelnyxPublicKey AdminToken RingTarget CellDid GvDid \
                      CellNumber OfficePhone GmailUser GmailAppPassword GatewaySecret \
-                     SmsGatewayUser SmsGatewayPass OpenAiApiKey RecordCalls; do
+                     SmsGatewayUser SmsGatewayPass SmsApiKey OpenAiApiKey RecordCalls; do
             value="${!key}"
             [ -n "$value" ] && params+=("$key=$value")
           done

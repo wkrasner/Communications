@@ -36,6 +36,12 @@ GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET", "")
 GATEWAY_USER = os.environ.get("SMS_GATEWAY_USER", "")
 GATEWAY_PASS = os.environ.get("SMS_GATEWAY_PASS", "")
 GATEWAY_API = "https://api.sms-gate.app/3rdparty/v1/messages"
+# SimpApp's SMS Gateway API (the Play Store one): bearer key, different shape.
+SMS_API_KEY = os.environ.get("SMS_API_KEY", "")
+SMS_API_URL = os.environ.get(
+    "SMS_API_URL",
+    "https://europe-west1-sms-gateway-api-simpapp.cloudfunctions.net/api_v2_sms_send",
+)
 OFFICE_PHONE = os.environ.get("OFFICE_PHONE", "")
 CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -491,12 +497,19 @@ def send_text(contact, text):
         store_message(f"out-{now_iso()}", contact, "", "GV", text,
                       direction="out", src="gv", relay=relay)
         return True, "sent from Google Voice"
-    if not (GATEWAY_USER and GATEWAY_PASS):
+    if SMS_API_KEY:
+        url = SMS_API_URL
+        body = json.dumps({"phoneNumber": contact, "message": text}).encode()
+        auth = f"Bearer {SMS_API_KEY}"
+    elif GATEWAY_USER and GATEWAY_PASS:
+        url = GATEWAY_API
+        body = json.dumps({"message": text, "phoneNumbers": [contact]}).encode()
+        auth = "Basic " + base64.b64encode(
+            f"{GATEWAY_USER}:{GATEWAY_PASS}".encode()).decode()
+    else:
         return False, "no SMS gateway credentials"
-    body = json.dumps({"message": text, "phoneNumbers": [contact]}).encode()
-    auth = base64.b64encode(f"{GATEWAY_USER}:{GATEWAY_PASS}".encode()).decode()
-    req = urllib.request.Request(GATEWAY_API, data=body, method="POST", headers={
-        "Authorization": f"Basic {auth}", "Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": auth, "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             r.read()
@@ -618,10 +631,17 @@ def respond(code, body, content_type="application/json"):
 
 
 def on_gateway_post(body):
-    """Webhook from the SMS Gateway app on the Android phone (sms:received)."""
-    p = body.get("payload") or {}
+    """Inbound text from the gateway app on the Android phone.
+
+    Two payload shapes are accepted so either app works: SimpApp's
+    {"type": "incoming_sms", "sender", "message"} and capcom6's
+    {"payload": {"phoneNumber", "message"}}.
+    """
+    if body.get("type") and body["type"] != "incoming_sms":
+        return  # delivery_status and friends: nothing to file
+    p = body.get("payload") or body
+    sender = p.get("sender") or p.get("phoneNumber") or ""
     text = p.get("message", "")
-    sender = p.get("phoneNumber", "")
     media = len(p.get("attachments") or p.get("media") or [])
     store_message(body.get("id") or p.get("messageId") or now_iso(),
                   sender, CELL_NUMBER, "Cell", text, src="cell", media=media)
