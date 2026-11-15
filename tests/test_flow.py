@@ -12,13 +12,15 @@ import handler as h  # noqa: E402
 class Flow(unittest.TestCase):
     def setUp(self):
         self.db, self.cmds, self.saved = {}, [], []
+        self.fail_actions = set()
         h.db_get = lambda pk: self.db.get(pk)
         h.db_put = lambda item: self.db.__setitem__(item["pk"], dict(item))
         h.db_update = lambda pk, **a: self.db.setdefault(pk, {}).update(a)
         h.db_delete = lambda pk: self.db.pop(pk, None)
         h.db_list = lambda kind, limit=200: [i for i in self.db.values() if i.get("gsi1pk") == kind]
         h.save_voicemail = lambda url, key: self.saved.append((url, key))
-        h.telnyx = lambda ccid, action, body, event_id="": (self.cmds.append((ccid, action, body)), True)[1]
+        h.telnyx = lambda ccid, action, body, event_id="": (
+            self.cmds.append((ccid, action, body)), action not in self.fail_actions)[1]
         self.n = 0
 
     def ev(self, etype, ccid="A", state=None, **payload):
@@ -103,6 +105,25 @@ class Flow(unittest.TestCase):
         n = len(self.cmds)
         self.ev("call.gather.ended", state=self.last()[2]["client_state"], digits="", status="call_hangup")
         self.assertEqual(len(self.cmds), n)
+
+    def test_unreachable_softphone_falls_back_to_voicemail_after_challenge(self):
+        """Transfer rejected outright (softphone not registered): no leg B, so no hangup webhook."""
+        self.fail_actions.add("transfer")
+        self.inbound()
+        self.ev("call.answered", state=self.last()[2]["client_state"])
+        self.ev("call.gather.ended", state=self.last()[2]["client_state"], digits="1", status="valid")
+        self.assertEqual(self.last()[:2], ("A", "speak"))
+        self.assertEqual(self.db["CALL#S1"]["result"], "ring_failed")
+
+    def test_unreachable_softphone_falls_back_for_allowed_caller(self):
+        self.fail_actions.add("transfer")
+        self.allow("+12155551234")
+        self.inbound()
+        ccid, action, body = self.last()
+        self.assertEqual((ccid, action), ("A", "answer"))
+        self.ev("call.answered", state=body["client_state"])
+        self.assertEqual(self.last()[1], "speak")
+        self.assertEqual(self.db["CALL#S1"]["result"], "ring_failed")
 
     def test_anonymous_caller_is_challenged(self):
         self.inbound(frm="anonymous")

@@ -233,7 +233,9 @@ def on_initiated(p, event_id):
     elif status == "allow":
         record["result"] = "missed"
         db_put(record)
-        ring_softphone(ccid, caller, label, False, event_id)
+        if not ring_softphone(ccid, caller, label, False, event_id):
+            db_update(pk, result="ring_failed")
+            telnyx(ccid, "answer", {"client_state": encode_state({"s": "vm"})}, event_id)
     else:
         record["result"] = "screening"
         db_put(record)
@@ -272,8 +274,13 @@ def on_gather_ended(p, state, event_id):
         db_update(pk, result="missed", screen="passed")
         rec = db_get(pk) or {}
         caller = rec.get("from", "")
-        ring_softphone(ccid, caller if caller.startswith("+") else "",
-                       f"{rec.get('line', 'Other')}: screened", True, event_id)
+        ok = ring_softphone(ccid, caller if caller.startswith("+") else "",
+                            f"{rec.get('line', 'Other')}: screened", True, event_id)
+        if not ok:
+            # The softphone could not be reached at all (not registered, bad
+            # credentials). No leg B exists, so no hangup webhook is coming.
+            db_update(pk, result="ring_failed")
+            start_voicemail_greeting(ccid, event_id)
     else:
         db_update(pk, result="screen_failed", screen="failed")
         start_voicemail_greeting(ccid, event_id)
