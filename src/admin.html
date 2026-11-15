@@ -31,11 +31,13 @@
 <div id="app" hidden>
   <nav>
     <button id="tabCalls" onclick="show('calls')">Calls</button>
+    <button id="tabTexts" onclick="show('texts')">Texts</button>
     <button id="tabNums" onclick="show('nums')">Numbers</button>
     <button onclick="signOut()" style="margin-left:auto">Sign out</button>
   </nav>
   <div id="msg" class="muted"></div>
   <section id="calls"></section>
+  <section id="texts" hidden></section>
   <section id="nums" hidden>
     <div class="stack">
       <textarea id="bulk" rows="5" placeholder="One per line: number, name&#10;609-555-0123, Dr. Smith"></textarea>
@@ -72,9 +74,24 @@ function signOut() {
   $('app').hidden = true; $('login').hidden = false;
 }
 function show(tab) {
-  $('calls').hidden = tab !== 'calls'; $('nums').hidden = tab !== 'nums';
-  $('tabCalls').className = tab === 'calls' ? 'on' : ''; $('tabNums').className = tab === 'nums' ? 'on' : '';
-  tab === 'calls' ? loadCalls() : loadNums();
+  for (const t of ['calls', 'texts', 'nums']) {
+    $(t).hidden = t !== tab;
+    $('tab' + t[0].toUpperCase() + t.slice(1)).className = t === tab ? 'on' : '';
+  }
+  ({calls: loadCalls, texts: loadTexts, nums: loadNums})[tab]();
+}
+async function loadTexts() {
+  say('Loading…');
+  const msgs = await api('GET', 'messages');
+  say(msgs.length ? '' : 'No texts yet.');
+  $('texts').innerHTML = msgs.map(m => `
+    <div class="row">
+      <div class="grow">
+        <div><b>${esc(m.name || m.from)}</b> <span class="tag">${esc(m.line)}</span></div>
+        <div>${esc(m.text) || '<i class="muted">no text</i>'}${m.media ? ` <span class="muted">(${m.media} attachment${m.media > 1 ? 's' : ''})</span>` : ''}</div>
+        <div class="muted">${esc(m.name ? m.from + ' · ' : '')}${new Date(m.ts).toLocaleString()}</div>
+      </div>
+    </div>`).join('');
 }
 async function loadCalls() {
   say('Loading…');

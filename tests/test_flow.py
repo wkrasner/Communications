@@ -137,6 +137,13 @@ class Flow(unittest.TestCase):
         self.assertEqual(h.normalize("+442071234567"), "+442071234567")
         self.assertEqual(h.normalize("Restricted"), "")
 
+    def test_inbound_text_is_stored(self):
+        h.handle_webhook({"data": {"event_type": "message.received", "id": "m1", "payload": {
+            "id": "msg-1", "from": {"phone_number": "+12155551234"},
+            "to": [{"phone_number": "+16095550002"}], "text": "hey", "media": []}}})
+        msg = [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"][0]
+        self.assertEqual((msg["from"], msg["line"], msg["text"]), ("+12155551234", "GV", "hey"))
+
     def test_admin_requires_token_and_saves_numbers(self):
         def call(method, path, body="", token=None, query=None):
             return h.lambda_handler({

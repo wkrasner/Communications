@@ -341,13 +341,32 @@ def on_recording_saved(p, event_id):
     db_update(f"CALL#{session}", voicemail=key, vm_ts=now_iso())
 
 
+def on_message_received(p):
+    """Store an inbound SMS/MMS so it shows in the panel."""
+    frm = p.get("from") or {}
+    caller = normalize(frm.get("phone_number", ""))
+    dids = [t.get("phone_number", "") for t in (p.get("to") or [])]
+    did = next((d for d in dids if d in LINES), dids[0] if dids else "")
+    entry = db_get(f"NUM#{caller}") if caller else None
+    ts = now_iso()
+    db_put({
+        "pk": f"MSG#{p.get('id', ts)}", "sk": "META", "gsi1pk": "MSGS", "gsi1sk": ts,
+        "ts": ts, "from": caller or frm.get("phone_number", "unknown"),
+        "name": (entry or {}).get("name", ""), "line": LINES.get(did, "Other"), "did": did,
+        "text": (p.get("text") or "")[:1500],
+        "media": len(p.get("media") or []),
+    })
+
+
 def handle_webhook(body):
     data = body.get("data", {})
     etype = data.get("event_type", "")
     p = data.get("payload", {})
     event_id = data.get("id", "")
     state = decode_state(p.get("client_state"))
-    if etype == "call.initiated":
+    if etype == "message.received":
+        on_message_received(p)
+    elif etype == "call.initiated":
         on_initiated(p, event_id)
     elif etype == "call.answered":
         on_answered(p, state, event_id)
@@ -370,6 +389,8 @@ def clean(item):
 def admin_api(method, path, query, body):
     if path == "/admin/api/calls" and method == "GET":
         return 200, [clean(i) for i in db_list("CALLS", 100)]
+    if path == "/admin/api/messages" and method == "GET":
+        return 200, [clean(i) for i in db_list("MSGS", 100)]
     if path == "/admin/api/numbers" and method == "GET":
         return 200, [clean(i) for i in db_list("NUMS", 1000)]
     if path == "/admin/api/numbers" and method == "POST":
