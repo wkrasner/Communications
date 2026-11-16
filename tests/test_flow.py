@@ -339,6 +339,9 @@ class GatewayAuth(Base):
     def test_secret_in_header_is_accepted(self):
         self.assertEqual(self.call(headers={"x-gateway-secret": "right"})["statusCode"], 200)
 
+    def test_secret_in_x_api_key_header_is_accepted(self):
+        self.assertEqual(self.call(headers={"x-api-key": "right"})["statusCode"], 200)
+
     def test_secret_in_query_string_is_accepted(self):
         self.assertEqual(self.call(query={"k": "right"})["statusCode"], 200)
 

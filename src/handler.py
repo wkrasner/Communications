@@ -738,6 +738,7 @@ def lambda_handler(event, context):
         # authenticates, and the payload decides how it is read.
         signed = verify_signature(raw_bytes, headers)
         secret = (headers.get("x-gateway-secret")
+                  or headers.get("x-api-key")  # what the Play Store app sends
                   or (event.get("queryStringParameters") or {}).get("k") or "")
         shared = bool(GATEWAY_SECRET) and hmac.compare_digest(secret, GATEWAY_SECRET)
         if not (signed or shared):
