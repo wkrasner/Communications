@@ -56,13 +56,18 @@ jobs:
           OpenAiApiKey: ${{ secrets.OPENAI_API_KEY }}
           RecordCalls: ${{ vars.RECORD_CALLS }}
         run: |
-          # An unset secret becomes an empty string, which SAM rejects outright.
-          # Omit those so the template's own default applies.
+          # Two traps here. An unset secret becomes an empty string, which SAM
+          # rejects outright, so omit those and let the template default apply.
+          # And SAM reads --parameter-overrides as space-separated Key=Value
+          # pairs, so any value containing a space is silently truncated at it
+          # (a Gmail app password pasted as four groups arrived as four
+          # characters). None of these values should contain whitespace.
           params=()
           for key in TelnyxApiKey TelnyxPublicKey AdminToken RingTarget CellDid GvDid \
                      CellNumber OfficePhone GmailUser GmailAppPassword GatewaySecret \
                      SmsGatewayUser SmsGatewayPass SmsApiKey OpenAiApiKey RecordCalls; do
             value="${!key}"
+            value="${value//[[:space:]]/}"
             [ -n "$value" ] && params+=("$key=$value")
           done
           sam deploy \
