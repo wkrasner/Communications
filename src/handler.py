@@ -30,8 +30,10 @@ VOICE = os.environ.get("VOICE", "female")
 LANGUAGE = os.environ.get("LANGUAGE", "en-US")
 TABLE_NAME = os.environ.get("TABLE_NAME", "")
 BUCKET = os.environ.get("VOICEMAIL_BUCKET", "")
-GMAIL_USER = os.environ.get("GMAIL_USER", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+GMAIL_USER = os.environ.get("GMAIL_USER", "").strip()
+# Google shows app passwords as four groups of four; the spaces are display
+# only and Gmail rejects them if they are sent.
+GMAIL_APP_PASSWORD = "".join(os.environ.get("GMAIL_APP_PASSWORD", "").split())
 GATEWAY_SECRET = os.environ.get("GATEWAY_SECRET", "")
 GATEWAY_USER = os.environ.get("SMS_GATEWAY_USER", "")
 GATEWAY_PASS = os.environ.get("SMS_GATEWAY_PASS", "")

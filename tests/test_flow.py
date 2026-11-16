@@ -453,3 +453,18 @@ class Status(Base):
             h.GMAIL_USER = h.GMAIL_APP_PASSWORD = ""
         self.assertIn("authentication failed", out["error"])
         self.assertIn("authentication failed", self.status()["gmail"]["error"])
+
+
+class Credentials(Base):
+    def test_app_password_spaces_are_stripped(self):
+        """Google displays app passwords as 'abcd efgh ijkl mnop'."""
+        import importlib
+        os.environ["GMAIL_APP_PASSWORD"] = "abcd efgh ijkl mnop"
+        os.environ["GMAIL_USER"] = " me@gmail.com "
+        try:
+            importlib.reload(h)
+            self.assertEqual(h.GMAIL_APP_PASSWORD, "abcdefghijklmnop")
+            self.assertEqual(h.GMAIL_USER, "me@gmail.com")
+        finally:
+            os.environ.pop("GMAIL_APP_PASSWORD"); os.environ.pop("GMAIL_USER")
+            importlib.reload(h)
