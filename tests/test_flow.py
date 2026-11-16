@@ -417,3 +417,39 @@ class EitherEndpoint(Base):
         for path in ("/telnyx", "/gateway"):
             self.assertEqual(self.post(path, self.app_text())["statusCode"], 401)
             self.assertEqual(self.post(path, self.app_text(), key="wrong")["statusCode"], 401)
+
+
+class Status(Base):
+    def status(self):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                              "rawPath": "/admin/api/status",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None, "body": ""}, None)
+        return json.loads(r["body"])
+
+    def test_reports_a_poll_that_has_never_run(self):
+        self.assertIn("not run yet", self.status()["gmail"]["note"])
+
+    def test_missing_credentials_are_recorded_not_silently_ignored(self):
+        h.GMAIL_USER = h.GMAIL_APP_PASSWORD = ""
+        out = h.poll_gmail()
+        self.assertIn("no Gmail user", out["error"])
+        self.assertIn("no Gmail user", self.status()["gmail"]["error"])
+
+    def test_a_failing_fetch_is_recorded(self):
+        h.GMAIL_USER, h.GMAIL_APP_PASSWORD = "me@gmail.com", "pw"
+        import sys, types
+        fake = types.ModuleType("gvmail")
+
+        def boom(*a, **k):
+            raise OSError("authentication failed")
+        fake.fetch = boom
+        sys.modules["gvmail"] = fake
+        try:
+            out = h.poll_gmail()
+        finally:
+            sys.modules.pop("gvmail", None)
+            h.GMAIL_USER = h.GMAIL_APP_PASSWORD = ""
+        self.assertIn("authentication failed", out["error"])
+        self.assertIn("authentication failed", self.status()["gmail"]["error"])

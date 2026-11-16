@@ -114,6 +114,7 @@
 <div class="bar" id="menu" hidden>
   <button id="tabInbox" onclick="show('inbox')">Inbox</button>
   <button id="tabNums" onclick="show('nums')">Numbers</button>
+  <button onclick="showStatus()">Status</button>
   <button onclick="signOut()" style="margin-left:auto">Sign out</button>
 </div>
 
@@ -356,6 +357,31 @@ async function mark(number, status) {
   say(number + ' → ' + status);
   refresh();
 }
+async function showStatus() {
+  $('menu').hidden = true;
+  tab = 'status'; openKey = null;
+  $('searchbar').hidden = true; $('composer').hidden = true; $('back').hidden = true;
+  $('title').textContent = 'Status';
+  say('Loading…');
+  const s = await api('GET', 'status');
+  say('');
+  const row = (k, v) => `<div class="item"><b>${esc(k)}</b><div class="muted"
+      style="word-break:break-all">${esc(v)}</div></div>`;
+  const g = s.gmail || {};
+  $('main').innerHTML = '<div class="thread">' + [
+    row('Google Voice poll', g.error ? 'FAILED — ' + g.error
+        : g.note ? g.note
+        : `ok — ${g.polled} new at ${when(g.ts)} (last message id ${g.uid ?? '—'})`),
+    row('Gmail account', s.gmail_user),
+    row('Gmail app password', s.has_gmail_password ? 'set' : 'MISSING'),
+    row('Cell send key', s.has_sms_api_key ? 'set' : 'missing — replies to cell texts will fail'),
+    row('Gateway secret', s.has_gateway_secret ? 'set' : 'MISSING'),
+    row('OpenAI key', s.has_openai_key ? 'set' : 'missing — no transcripts'),
+    row('Call recording', s.record_calls ? 'on' : 'off'),
+    row('Office number', s.office_phone),
+  ].join('') + '</div>';
+}
+
 async function loadNums() {
   $('searchbar').hidden = true; $('composer').hidden = true; $('back').hidden = true;
   $('title').textContent = 'Numbers';

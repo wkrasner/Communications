@@ -523,19 +523,34 @@ def send_text(contact, text):
 
 
 def poll_gmail():
-    """Pull new Google Voice notification emails into the message store."""
+    """Pull new Google Voice notification emails into the message store.
+
+    Records the outcome either way: a poll that quietly fails every minute is
+    indistinguishable from one that finds nothing, so the panel shows which.
+    """
+    status = {"ts": now_iso()}
     if not (GMAIL_USER and GMAIL_APP_PASSWORD):
-        return {"polled": 0, "note": "no Gmail credentials set"}
-    import gvmail
+        status["error"] = "no Gmail user or app password configured"
+        db_put({"pk": "STATE#gvpoll", "sk": "META", **status})
+        return status
     cursor = db_get("STATE#gvuid") or {}
     since = int(cursor.get("uid", 0))
-    msgs, highest = gvmail.fetch(GMAIL_USER, GMAIL_APP_PASSWORD, since)
+    try:
+        import gvmail
+        msgs, highest = gvmail.fetch(GMAIL_USER, GMAIL_APP_PASSWORD, since)
+    except Exception as e:
+        status["error"] = f"{type(e).__name__}: {e}"[:300]
+        print(f"gmail poll failed: {status['error']}")
+        db_put({"pk": "STATE#gvpoll", "sk": "META", **status})
+        return status
     for m in msgs:
         store_message(f"gv-{m['uid']}", m["from"], os.environ.get("GV_DID", ""),
                       "GV", m["text"], src="gv", relay=m["relay"], name=m["name"])
+    status.update(polled=len(msgs), uid=highest, since=since, user=GMAIL_USER)
     if highest > since:
         db_put({"pk": "STATE#gvuid", "sk": "META", "uid": highest})
-    return {"polled": len(msgs), "uid": highest}
+    db_put({"pk": "STATE#gvpoll", "sk": "META", **status})
+    return status
 
 
 def on_message_received(p):
@@ -590,6 +605,18 @@ def admin_api(method, path, query, body):
         return (200 if ok else 502), {"ok": ok, "note": note}
     if path == "/admin/api/office-reply" and method == "GET":
         return 200, {"text": office_reply()}
+    if path == "/admin/api/status" and method == "GET":
+        gv = db_get("STATE#gvpoll") or {}
+        return 200, {
+            "gmail": clean(gv) if gv else {"note": "the Gmail poll has not run yet"},
+            "gmail_user": GMAIL_USER or "(not set)",
+            "has_gmail_password": bool(GMAIL_APP_PASSWORD),
+            "has_sms_api_key": bool(SMS_API_KEY),
+            "has_gateway_secret": bool(GATEWAY_SECRET),
+            "has_openai_key": bool(OPENAI_KEY),
+            "record_calls": RECORD_CALLS,
+            "office_phone": OFFICE_PHONE or "(not set)",
+        }
     if path == "/admin/api/poll" and method == "POST":
         return 200, poll_gmail()
     if path == "/admin/api/numbers" and method == "GET":
