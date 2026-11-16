@@ -301,14 +301,14 @@ function render() {
     $('composer').hidden = !g.key.startsWith('+');
     $('main').innerHTML = `
       <div class="thread">
-        ${g.key.startsWith('+') ? `
-          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          ${g.key.startsWith('+') ? `
             <button class="small" onclick="mark('${esc(g.key)}','allow')">Allow</button>
-            <button class="small" onclick="mark('${esc(g.key)}','block')">Block</button>
-            <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
-            <button class="small" onclick="thread('${esc(g.key)}','delete')">Delete</button>
-            ${g.flagged && officeText ? `<button class="small" onclick="useOffice()">Office referral</button>` : ''}
-          </div>` : ''}
+            <button class="small" onclick="mark('${esc(g.key)}','block')">Block</button>` : ''}
+          <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
+          <button class="small" onclick="thread('${esc(g.key)}','delete')">Delete</button>
+          ${g.key.startsWith('+') && g.flagged && officeText ? `<button class="small" onclick="useOffice()">Office referral</button>` : ''}
+        </div>
         <div class="pane">
           <h3 onclick="section('texts')" style="cursor:pointer">
             ${shut.has('texts') ? '&#9656;' : '&#9662;'} Texts (${g.msgs.length})</h3>
@@ -348,9 +348,9 @@ function render() {
           ${g.msgs.length} text${g.msgs.length === 1 ? '' : 's'} · ${when(g.last)}</span>
         ${g.key.startsWith('+') ? `
           <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','allow')">Allow</button>
-          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">Block</button>
-          <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
-          <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','delete')">Delete</button>` : ''}
+          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">Block</button>` : ''}
+        <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
+        <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','delete')">Delete</button>
       </div>
       ${isOpen ? `
       <div class="panes">

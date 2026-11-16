@@ -616,7 +616,9 @@ def admin_api(method, path, query, body):
     if path == "/admin/api/office-reply" and method == "GET":
         return 200, {"text": office_reply()}
     if path == "/admin/api/thread" and method == "POST":
-        contact = normalize(body.get("contact"))
+        raw = (body.get("contact") or "").strip()
+        # Short codes never normalise, and those threads need removing too.
+        contact = normalize(raw) or raw
         action = body.get("action")
         if not contact or action not in ("archive", "unarchive", "delete"):
             return 400, {"error": "need a contact and archive, unarchive or delete"}

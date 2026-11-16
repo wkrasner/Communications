@@ -607,3 +607,33 @@ class DeleteOddNumbers(Base):
         self.db["NUM#+16095550123"] = {"pk": "NUM#+16095550123", "status": "allow"}
         self.assertEqual(self.delete("609-555-0123"), 200)
         self.assertNotIn("NUM#+16095550123", self.db)
+
+
+class ShortCodeThreads(Base):
+    def post(self, contact, action):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/thread",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps({"contact": contact, "action": action})}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def test_short_code_thread_can_be_deleted(self):
+        h.store_message("sc1", "22000", "", "Cell", "your code is 1234", src="telnyx")
+        code, out = self.post("22000", "delete")
+        self.assertEqual(code, 200)
+        self.assertEqual(out["deleted"], 1)
+        self.assertNotIn("MSG#sc1", self.db)
+
+    def test_short_code_thread_can_be_archived(self):
+        h.store_message("sc2", "22000", "", "Cell", "code", src="telnyx")
+        code, out = self.post("22000", "archive")
+        self.assertEqual((code, out["archived"]), (200, 1))
+        self.assertTrue(self.db["MSG#sc2"]["archived"])
+
+    def test_archive_and_delete_buttons_are_not_gated_on_a_plus_prefix(self):
+        page = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""}, None)["body"]
+        after = page.split("Allow</button>")[-1]
+        self.assertIn("'delete'", after)
