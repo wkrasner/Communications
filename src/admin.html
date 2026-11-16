@@ -472,6 +472,11 @@ async function showStatus() {
          New Jersey is one-party consent; some states a caller may be in are not.</div>`}
      </div>`,
     row('Office number', s.office_phone),
+    `<div class="item"><b>Google Voice texts</b>
+       <div class="muted">Re-read the mailbox and rewrite every Google Voice
+         message from scratch. Use after a parsing fix; nothing is duplicated.</div>
+       <button class="small" style="margin-top:7px" onclick="reparse()">Re-import</button>
+     </div>`,
   ].join('') + '</div>';
 }
 
@@ -481,6 +486,14 @@ async function callOut(to) {
     const r = await api('POST', 'call', {to});
     say(r.ok ? r.note : 'Could not call — ' + r.note);
   } catch (e) { say('Could not call — ' + e.message); }
+}
+
+async function reparse() {
+  say('Re-reading the mailbox…');
+  try {
+    const r = await api('POST', 'poll', {reset: true});
+    say(r.error ? 'Failed — ' + r.error : `Re-imported ${r.polled} message(s).`);
+  } catch (e) { say('Failed — ' + e.message); }
 }
 
 async function setRecording(on) {

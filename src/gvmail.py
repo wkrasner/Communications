@@ -27,6 +27,9 @@ _CUT = re.compile(
     r"you(?:'re| are) receiving this|https?://(?:www\.)?google\.com/voice|"
     r"YOUR ACCOUNT\b|Sent from Google Voice)"
 )
+# Google puts a bare link to Voice above the message itself, sometimes
+# wrapped in angle brackets.
+_LEAD = re.compile(r"(?i)^\s*(?:<\s*)?https?://\S*voice\.google\.com\S*(?:\s*>)?\s*$")
 _PHONE = re.compile(r"\+?1?[\s.-]?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})")
 
 
@@ -76,7 +79,12 @@ def parse(msg):
         return None
     body = _body(msg)
     cut = _CUT.search(body)
-    text = (body[: cut.start()] if cut else body).strip()
+    text = body[: cut.start()] if cut else body
+    # Drop the header links and blank lines Google puts above the message.
+    lines = text.splitlines()
+    while lines and (not lines[0].strip() or _LEAD.match(lines[0])):
+        lines.pop(0)
+    text = "\n".join(lines).strip()
     return {
         "relay": m.group(0),
         "from": _sender_number(msg, body),

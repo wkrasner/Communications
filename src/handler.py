@@ -727,6 +727,10 @@ def admin_api(method, path, query, body):
             "office_phone": OFFICE_PHONE or "(not set)",
         }
     if path == "/admin/api/poll" and method == "POST":
+        # Re-reads the whole mailbox; messages keep their ids, so a reparse
+        # overwrites them in place rather than duplicating.
+        if body.get("reset"):
+            db_delete("STATE#gvuid")
         return 200, poll_gmail()
     if path == "/admin/api/numbers" and method == "GET":
         return 200, [clean(i) for i in db_list("NUMS", 1000)]
