@@ -431,6 +431,15 @@ class Status(Base):
     def test_reports_a_poll_that_has_never_run(self):
         self.assertIn("not run yet", self.status()["gmail"]["note"])
 
+    def test_password_length_is_reported_but_not_the_password(self):
+        h.GMAIL_APP_PASSWORD = "abcdefghijklmnop"
+        try:
+            out = self.status()
+        finally:
+            h.GMAIL_APP_PASSWORD = ""
+        self.assertEqual(out["gmail_password_len"], 16)
+        self.assertNotIn("abcdefghijklmnop", json.dumps(out))
+
     def test_missing_credentials_are_recorded_not_silently_ignored(self):
         h.GMAIL_USER = h.GMAIL_APP_PASSWORD = ""
         out = h.poll_gmail()

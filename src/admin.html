@@ -452,7 +452,10 @@ async function showStatus() {
         : g.note ? g.note
         : `ok — ${g.polled} new at ${when(g.ts)} (last message id ${g.uid ?? '—'})`),
     row('Gmail account', s.gmail_user),
-    row('Gmail app password', s.has_gmail_password ? 'set' : 'MISSING'),
+    row('Gmail app password', s.gmail_password_len
+        ? `${s.gmail_password_len} characters` + (s.gmail_password_len === 16
+            ? ' (right length)' : ' — Google app passwords are 16')
+        : 'MISSING'),
     row('Cell send key', s.has_sms_api_key ? 'set' : 'missing — replies to cell texts will fail'),
     row('Gateway secret', s.has_gateway_secret ? 'set' : 'MISSING'),
     row('OpenAI key', s.has_openai_key ? 'set' : 'missing — no transcripts'),

@@ -635,7 +635,7 @@ def admin_api(method, path, query, body):
         return 200, {
             "gmail": clean(gv) if gv else {"note": "the Gmail poll has not run yet"},
             "gmail_user": GMAIL_USER or "(not set)",
-            "has_gmail_password": bool(GMAIL_APP_PASSWORD),
+            "gmail_password_len": len(GMAIL_APP_PASSWORD),
             "has_sms_api_key": bool(SMS_API_KEY),
             "has_gateway_secret": bool(GATEWAY_SECRET),
             "has_openai_key": bool(OPENAI_KEY),
