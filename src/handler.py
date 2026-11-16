@@ -300,9 +300,28 @@ def start_voicemail_greeting(ccid, event_id):
     }, event_id)
 
 
+def on_outbound_initiated(p):
+    """A call placed from the softphone, logged so it shows in the thread."""
+    called = normalize(p.get("to", ""))
+    entry = db_get(f"NUM#{called}") if called else None
+    ts = now_iso()
+    db_put({
+        "pk": f"CALL#{p['call_session_id']}", "sk": "META",
+        "gsi1pk": "CALLS", "gsi1sk": ts, "ts": ts,
+        "from": called or p.get("to", "unknown"),  # thread key is the other party
+        "name": (entry or {}).get("name", ""), "line": "Outbound",
+        "dir": "out", "list": (entry or {}).get("status", "unknown"),
+        "answered": False, "result": "dialed",
+    })
+
+
 def on_initiated(p, event_id):
     if p.get("direction") != "incoming":
-        return  # the leg we created toward the softphone
+        # Outgoing: either a leg we created to ring the softphone (which
+        # carries our own client_state) or a call he placed himself.
+        if not decode_state(p.get("client_state")).get("s"):
+            on_outbound_initiated(p)
+        return
     ccid = p["call_control_id"]
     caller = normalize(p.get("from"))
     did = p.get("to", "")
@@ -351,6 +370,19 @@ def on_answered(p, state, event_id):
         }, event_id)
     elif s == "vm":
         start_voicemail_greeting(ccid, event_id)
+    elif s == "ctc":
+        # He picked up: now dial the person he asked for and bridge the two.
+        telnyx(ccid, "transfer", {
+            "to": state.get("t", ""),
+            "from": os.environ.get("GV_DID") or os.environ.get("CELL_DID") or "",
+            "timeout_secs": 45,
+            "client_state": encode_state({"s": "ctcb"}),
+        }, event_id)
+    elif not s:
+        # An outbound call he placed from the softphone.
+        pk = f"CALL#{p['call_session_id']}"
+        if db_get(pk):
+            db_update(pk, answered=True, result="answered")
     elif s == "ring":
         pk = f"CALL#{p['call_session_id']}"
         db_update(pk, answered=True, result="answered")
@@ -401,6 +433,11 @@ def on_speak_ended(p, state, event_id):
 
 def on_hangup(p, state, event_id):
     pk = f"CALL#{p['call_session_id']}"
+    if not state.get("s"):
+        rec = db_get(pk)
+        if rec and rec.get("dir") == "out" and not rec.get("answered"):
+            db_update(pk, result="no answer")
+        return
     if state.get("s") != "ring":
         return
     # The softphone leg ended. If it was never answered, send the caller to voicemail.
@@ -637,6 +674,38 @@ def admin_api(method, path, query, body):
         for i in items:
             db_update(i["pk"], archived=(action == "archive"))
         return 200, {"archived" if action == "archive" else "restored": len(items)}
+
+    if path == "/admin/api/call" and method == "POST":
+        to = normalize(body.get("to"))
+        if not to:
+            return 400, {"error": "bad number"}
+        if not (RING_TARGET and API_KEY):
+            return 502, {"ok": False, "note": "no softphone configured"}
+        # Ring his handset first, then dial out and bridge, so the audio and
+        # the mute/speaker controls stay native on the phone.
+        did = os.environ.get("GV_DID") or os.environ.get("CELL_DID") or ""
+        payload = {
+            "to": RING_TARGET, "timeout_secs": RING_SECS,
+            "from_display_name": f"Call {to}"[:60],
+            "client_state": encode_state({"s": "ctc", "t": to}),
+        }
+        if did:
+            payload["from"] = did
+        req = urllib.request.Request(
+            f"{TELNYX_API}/calls",
+            data=json.dumps({**payload, "connection_id": os.environ.get(
+                "VOICE_APP_ID", "")}).encode(),
+            headers={"Authorization": f"Bearer {API_KEY}",
+                     "Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:300].decode("utf-8", "replace")
+            return 502, {"ok": False, "note": f"Telnyx {e.code}: {detail}"}
+        except Exception as e:
+            return 502, {"ok": False, "note": f"could not place the call: {e}"}
+        return 200, {"ok": True, "note": "Your phone is ringing — answer to connect."}
 
     if path == "/admin/api/settings" and method == "POST":
         if "record" not in body:

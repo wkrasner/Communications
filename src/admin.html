@@ -303,6 +303,7 @@ function render() {
       <div class="thread">
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           ${g.key.startsWith('+') ? `
+            <button class="small" onclick="callOut('${esc(g.key)}')">Call</button>
             <button class="small" onclick="mark('${esc(g.key)}','allow')">Allow</button>
             <button class="small" onclick="mark('${esc(g.key)}','block')">Block</button>` : ''}
           <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
@@ -347,6 +348,7 @@ function render() {
         <span class="muted">${g.calls.length} call${g.calls.length === 1 ? '' : 's'} ·
           ${g.msgs.length} text${g.msgs.length === 1 ? '' : 's'} · ${when(g.last)}</span>
         ${g.key.startsWith('+') ? `
+          <button class="small" onclick="event.stopPropagation();callOut('${esc(g.key)}')">Call</button>
           <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','allow')">Allow</button>
           <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">Block</button>` : ''}
         <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
@@ -471,6 +473,14 @@ async function showStatus() {
      </div>`,
     row('Office number', s.office_phone),
   ].join('') + '</div>';
+}
+
+async function callOut(to) {
+  say('Ringing your phone…');
+  try {
+    const r = await api('POST', 'call', {to});
+    say(r.ok ? r.note : 'Could not call — ' + r.note);
+  } catch (e) { say('Could not call — ' + e.message); }
 }
 
 async function setRecording(on) {

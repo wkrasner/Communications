@@ -29,6 +29,10 @@ The panel follows the screen it is on. On a phone it is a conversation list you 
 
 Before turning call recording on: New Jersey is a one-party-consent state, but several states a caller may be in — Pennsylvania among them — require everyone on the line to consent. The switch is off by default for that reason.
 
+**Outbound calls** are logged too, but only once the SIP connection has a webhook URL set (SIP Trunking → the connection → Webhooks). Without it, calls placed from the handset leave through the connection and this app never hears about them.
+
+**Click to call** rings your own handset first and bridges you to the other party when you answer. That is deliberate rather than a browser softphone: on Android, a web page cannot switch between earpiece and speaker (`setSinkId` is not supported there), so routing the call to the SIP app keeps mute, speaker and Bluetooth native. It needs `VOICE_APP_ID`, the Voice API application's id.
+
 Not built yet: the AI screener, scheduled/queued texts.
 
 ## Setup

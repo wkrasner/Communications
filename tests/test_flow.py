@@ -692,3 +692,81 @@ class RecordingSwitch(Base):
                               "headers": {"x-admin-token": "secret"},
                               "queryStringParameters": None, "body": "{}"}, None)
         self.assertEqual(r["statusCode"], 400)
+
+
+class OutboundCalls(Base):
+    def outbound(self, to="+12155551234"):
+        self.ev("call.initiated", direction="outgoing", to=to, **{"from": "+16098205401"})
+
+    def test_call_placed_from_the_softphone_is_logged(self):
+        self.db["NUM#+12155551234"] = {"status": "allow", "name": "Mom"}
+        self.outbound()
+        rec = self.db["CALL#S1"]
+        self.assertEqual((rec["from"], rec["dir"], rec["line"], rec["name"], rec["result"]),
+                         ("+12155551234", "out", "Outbound", "Mom", "dialed"))
+
+    def test_outbound_answer_and_hangup_update_it(self):
+        self.outbound()
+        self.ev("call.answered")
+        self.assertEqual(self.db["CALL#S1"]["result"], "answered")
+        self.ev("call.hangup", hangup_cause="normal_clearing")
+        self.assertEqual(self.db["CALL#S1"]["result"], "answered")
+
+    def test_unanswered_outbound_is_marked(self):
+        self.outbound()
+        self.ev("call.hangup", hangup_cause="no_answer")
+        self.assertEqual(self.db["CALL#S1"]["result"], "no answer")
+
+    def test_the_leg_we_create_to_ring_the_softphone_is_not_logged_twice(self):
+        self.db["NUM#+12155551234"] = {"status": "allow", "name": "Mom"}
+        self.inbound()                                  # inbound call, logged once
+        ring = self.last()[2]["client_state"]
+        self.ev("call.initiated", ccid="B", state=ring, direction="outgoing",
+                to="sip:me@sip.telnyx.com")
+        self.assertEqual(self.db["CALL#S1"]["line"], "Cell")   # not overwritten
+        self.assertNotEqual(self.db["CALL#S1"].get("dir"), "out")
+
+
+class ClickToCall(Base):
+    def setUp(self):
+        super().setUp()
+        h.API_KEY, h.RING_TARGET = "k", "sip:me@sip.telnyx.com"
+        self.posted, self.real = [], h.urllib.request.urlopen
+
+        def fake(req, timeout=0):
+            self.posted.append(req)
+            return type("R", (), {"read": lambda s: b"{}", "__enter__": lambda s: s,
+                                  "__exit__": lambda s, *a: None})()
+        h.urllib.request.urlopen = fake
+
+    def tearDown(self):
+        h.urllib.request.urlopen = self.real
+
+    def call(self, to):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/call",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps({"to": to})}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def test_rings_the_handset_first(self):
+        code, out = self.call("215-555-1234")
+        self.assertEqual(code, 200)
+        self.assertTrue(out["ok"])
+        sent = json.loads(self.posted[0].data)
+        self.assertEqual(sent["to"], "sip:me@sip.telnyx.com")
+        self.assertEqual(h.decode_state(sent["client_state"]),
+                         {"s": "ctc", "t": "+12155551234"})
+
+    def test_answering_bridges_to_the_person(self):
+        self.call("215-555-1234")
+        state = json.loads(self.posted[0].data)["client_state"]
+        self.ev("call.answered", state=state)
+        ccid, action, body = self.last()
+        self.assertEqual(action, "transfer")
+        self.assertEqual(body["to"], "+12155551234")
+
+    def test_bad_number_is_refused(self):
+        self.assertEqual(self.call("nonsense")[0], 400)

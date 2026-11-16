@@ -17,6 +17,7 @@ Parameters:
   SmsGatewayUser: { Type: String, Default: '' }
   SmsGatewayPass: { Type: String, Default: '', NoEcho: true }
   SmsApiKey: { Type: String, Default: '', NoEcho: true }
+  VoiceAppId: { Type: String, Default: '', Description: 'Telnyx Voice API application id, for click-to-call' }
   OpenAiApiKey: { Type: String, Default: '', NoEcho: true }
   RecordCalls: { Type: String, Default: 'off', AllowedValues: ['on', 'off'] }
 
@@ -86,6 +87,7 @@ Resources:
           SMS_GATEWAY_USER: !Ref SmsGatewayUser
           SMS_GATEWAY_PASS: !Ref SmsGatewayPass
           SMS_API_KEY: !Ref SmsApiKey
+          VOICE_APP_ID: !Ref VoiceAppId
           OPENAI_API_KEY: !Ref OpenAiApiKey
           RECORD_CALLS: !Ref RecordCalls
       Policies:
