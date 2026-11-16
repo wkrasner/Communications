@@ -459,9 +459,30 @@ async function showStatus() {
     row('Cell send key', s.has_sms_api_key ? 'set' : 'missing — replies to cell texts will fail'),
     row('Gateway secret', s.has_gateway_secret ? 'set' : 'MISSING'),
     row('OpenAI key', s.has_openai_key ? 'set' : 'missing — no transcripts'),
-    row('Call recording', s.record_calls ? 'on' : 'off'),
+    `<div class="item"><b>Call recording</b>
+       <div class="muted">${s.record_calls
+         ? 'on — answered calls are recorded and transcribed'
+         : 'off — only voicemail is recorded'}</div>
+       <button class="small" style="margin-top:7px"
+         onclick="setRecording(${s.record_calls ? 'false' : 'true'})">
+         Turn ${s.record_calls ? 'off' : 'on'}</button>
+       ${s.record_calls ? '' : `<div class="muted" style="margin-top:6px">
+         New Jersey is one-party consent; some states a caller may be in are not.</div>`}
+     </div>`,
     row('Office number', s.office_phone),
   ].join('') + '</div>';
+}
+
+async function setRecording(on) {
+  if (on && !confirm('Record both sides of answered calls?\n\n' +
+      'New Jersey is one-party consent, but a caller in an all-party state ' +
+      '(Pennsylvania among them) may need to be told.')) return;
+  say('Saving…');
+  try {
+    await api('POST', 'settings', {record: on});
+    await showStatus();
+    say('Call recording ' + (on ? 'on' : 'off') + '.');
+  } catch (e) { say('Failed — ' + e.message); }
 }
 
 async function loadNums() {

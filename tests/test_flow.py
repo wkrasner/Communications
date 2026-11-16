@@ -637,3 +637,55 @@ class ShortCodeThreads(Base):
                                  "rawPath": "/admin", "headers": {}, "body": ""}, None)["body"]
         after = page.split("Allow</button>")[-1]
         self.assertIn("'delete'", after)
+
+
+class RecordingSwitch(Base):
+    def setUp(self):
+        super().setUp()
+        h.ADMIN_TOKEN = "secret"
+        h.RECORD_CALLS = False
+
+    def set(self, on):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/settings",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps({"record": on})}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def answer_a_call(self):
+        self.db["NUM#+12155551234"] = {"status": "allow", "name": "Mom"}
+        self.inbound()
+        ring = self.last()[2]["client_state"]
+        self.ev("call.answered", ccid="B", state=ring)
+
+    def test_defaults_to_the_deployed_value(self):
+        self.assertFalse(h.recording_on())
+
+    def test_toggling_on_takes_effect_without_a_deploy(self):
+        self.assertEqual(self.set(True), (200, {"record_calls": True}))
+        self.assertTrue(h.recording_on())
+        self.answer_a_call()
+        self.assertEqual(self.last()[:2], ("A", "record_start"))
+
+    def test_toggling_back_off_stops_recording(self):
+        self.set(True)
+        self.set(False)
+        self.assertFalse(h.recording_on())
+        self.answer_a_call()
+        self.assertNotIn("record_start", [c[1] for c in self.cmds])
+
+    def test_stored_switch_overrides_a_deployed_on(self):
+        h.RECORD_CALLS = True
+        try:
+            self.set(False)
+            self.assertFalse(h.recording_on())
+        finally:
+            h.RECORD_CALLS = False
+
+    def test_empty_body_is_refused(self):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/settings",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None, "body": "{}"}, None)
+        self.assertEqual(r["statusCode"], 400)

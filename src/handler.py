@@ -49,9 +49,15 @@ CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_URL = "https://api.openai.com/v1/audio/transcriptions"
 OPENAI_MODEL = os.environ.get("TRANSCRIBE_MODEL", "whisper-1")
-# Answered calls are recorded only when this is on. Recording consent law
-# varies by state, so it is a deliberate switch rather than a default.
+# Whether answered calls are recorded. The deployed value is only the
+# starting point; the live switch lives in the table so it can be turned on
+# and off from the app without a deploy.
 RECORD_CALLS = os.environ.get("RECORD_CALLS", "off").lower() in ("on", "true", "1")
+
+
+def recording_on():
+    row = db_get("SETTING#record")
+    return bool(row["on"]) if row and "on" in row else RECORD_CALLS
 # Telnyx DID -> label for the line that forwards to it
 LINES = {
     os.environ.get("CELL_DID", ""): "Cell",
@@ -348,7 +354,7 @@ def on_answered(p, state, event_id):
     elif s == "ring":
         pk = f"CALL#{p['call_session_id']}"
         db_update(pk, answered=True, result="answered")
-        if RECORD_CALLS:
+        if recording_on():
             # Record on leg A so both sides are captured.
             a_ccid = state.get("a")
             if a_ccid:
@@ -632,6 +638,13 @@ def admin_api(method, path, query, body):
             db_update(i["pk"], archived=(action == "archive"))
         return 200, {"archived" if action == "archive" else "restored": len(items)}
 
+    if path == "/admin/api/settings" and method == "POST":
+        if "record" not in body:
+            return 400, {"error": "nothing to set"}
+        on = bool(body["record"])
+        db_put({"pk": "SETTING#record", "sk": "META", "on": on})
+        return 200, {"record_calls": on}
+
     if path == "/admin/api/status" and method == "GET":
         gv = db_get("STATE#gvpoll") or {}
         return 200, {
@@ -641,7 +654,7 @@ def admin_api(method, path, query, body):
             "has_sms_api_key": bool(SMS_API_KEY),
             "has_gateway_secret": bool(GATEWAY_SECRET),
             "has_openai_key": bool(OPENAI_KEY),
-            "record_calls": RECORD_CALLS,
+            "record_calls": recording_on(),
             "office_phone": OFFICE_PHONE or "(not set)",
         }
     if path == "/admin/api/poll" and method == "POST":

@@ -25,7 +25,7 @@ The panel follows the screen it is on. On a phone it is a conversation list you 
 - **Google Voice texts** arrive by Gmail: Google Voice forwards each text to the account's email, a once-a-minute IMAP poll picks it up, and a reply is sent over SMTP to Google's relay address, which Google turns back into a text from the Google Voice number.
 - **Medical-sounding texts** are flagged, and a one-tap button fills the reply box with a message pointing the sender at the office. Nothing is sent automatically.
 
-**Transcription.** Voicemail is transcribed automatically. Answered calls are recorded and transcribed only when `RECORD_CALLS` is `on` — it ships off. Transcripts appear under the call in the panel and are included in search. Transcription runs in a second, asynchronous Lambda invocation so a long recording never holds the Telnyx webhook open.
+**Transcription.** Voicemail is transcribed automatically. Answered calls are recorded and transcribed only when call recording is on, which is a toggle on the Status screen rather than a deploy setting; `RECORD_CALLS` is only the starting value for a fresh stack. Transcripts appear under the call in the panel and are included in search. Transcription runs in a second, asynchronous Lambda invocation so a long recording never holds the Telnyx webhook open.
 
 Before turning call recording on: New Jersey is a one-party-consent state, but several states a caller may be in — Pennsylvania among them — require everyone on the line to consent. The switch is off by default for that reason.
 
