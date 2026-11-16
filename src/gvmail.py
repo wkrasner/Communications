@@ -98,7 +98,12 @@ def fetch(user, password, since_uid=0, limit=50):
     conn = imaplib.IMAP4_SSL(IMAP_HOST, ssl_context=ssl.create_default_context())
     try:
         conn.login(user, password)
-        conn.select("INBOX", readonly=True)
+        # All Mail rather than INBOX: a filter that archives or forwards the
+        # Voice notifications would otherwise hide them. Its name is
+        # localised, so fall back to the inbox if it is not there.
+        for box in ('"[Gmail]/All Mail"', "INBOX"):
+            if conn.select(box, readonly=True)[0] == "OK":
+                break
         criteria = f"UID {since_uid + 1}:*" if since_uid else "ALL"
         typ, data = conn.uid("SEARCH", None, criteria, "FROM", GV_DOMAIN)
         if typ != "OK":
