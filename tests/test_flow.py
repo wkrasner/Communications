@@ -371,3 +371,49 @@ class Pages(Base):
         """Rules like .composer { display: flex } beat the UA's [hidden] rule."""
         body = self.get("/admin")["body"]
         self.assertIn("[hidden] { display: none !important; }", body)
+
+
+class EitherEndpoint(Base):
+    """Telnyx on /gateway or the phone app on /telnyx should both still work."""
+
+    def post(self, path, body, signed=False, key=None):
+        real = h.verify_signature
+        h.verify_signature = lambda raw, headers: signed
+        h.GATEWAY_SECRET = "s3cret"
+        try:
+            return h.lambda_handler({
+                "requestContext": {"http": {"method": "POST"}}, "rawPath": path,
+                "headers": {}, "queryStringParameters": {"k": key} if key else None,
+                "body": json.dumps(body)}, None)
+        finally:
+            h.verify_signature = real
+
+    def telnyx_text(self):
+        return {"data": {"event_type": "message.received", "id": "m1", "payload": {
+            "id": "x1", "from": {"phone_number": "+12155551234"},
+            "to": [{"phone_number": "+16095550002"}], "text": "from telnyx"}}}
+
+    def app_text(self):
+        return {"type": "incoming_sms", "sender": "+12155559999", "message": "from phone"}
+
+    def stored(self):
+        return [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"]
+
+    def test_signed_telnyx_payload_on_gateway_path(self):
+        self.assertEqual(self.post("/gateway", self.telnyx_text(), signed=True)["statusCode"], 200)
+        self.assertEqual(self.stored()[0]["text"], "from telnyx")
+
+    def test_app_payload_with_key_on_telnyx_path(self):
+        self.assertEqual(self.post("/telnyx", self.app_text(), key="s3cret")["statusCode"], 200)
+        self.assertEqual(self.stored()[0]["text"], "from phone")
+
+    def test_each_still_works_on_its_own_path(self):
+        self.post("/telnyx", self.telnyx_text(), signed=True)
+        self.post("/gateway", self.app_text(), key="s3cret")
+        self.assertEqual(sorted(m["text"] for m in self.stored()),
+                         ["from phone", "from telnyx"])
+
+    def test_unauthenticated_is_still_rejected_on_both(self):
+        for path in ("/telnyx", "/gateway"):
+            self.assertEqual(self.post(path, self.app_text())["statusCode"], 401)
+            self.assertEqual(self.post(path, self.app_text(), key="wrong")["statusCode"], 401)

@@ -14,6 +14,8 @@ The panel follows the screen it is on. On a phone it is a conversation list you 
 
 - **Cell texts** arrive from a gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number. Two apps are supported and the inbound handler accepts either payload shape: SimpApp's *SMS Gateway API* (on the Play Store, set `SMS_API_KEY`) and capcom6's *SMS Gateway* (sideloaded, set `SMS_GATEWAY_USER`/`SMS_GATEWAY_PASS`). The Play Store one relays through the vendor's Firebase; the sideloaded one talks straight to this Lambda.
   Neither app authenticates its webhook calls, so the shared secret rides in the URL as `?k=...`.
+
+`/telnyx` and `/gateway` both accept both senders. A request is read as a Telnyx webhook when it carries a valid Telnyx signature, and as a phone-app post when it carries the shared secret — the path itself decides nothing. Pointing the wrong URL at the wrong place is therefore harmless, and an unauthenticated request is still rejected on either.
 - **Google Voice texts** arrive by Gmail: Google Voice forwards each text to the account's email, a once-a-minute IMAP poll picks it up, and a reply is sent over SMTP to Google's relay address, which Google turns back into a text from the Google Voice number.
 - **Medical-sounding texts** are flagged, and a one-tap button fills the reply box with a message pointing the sender at the office. Nothing is sent automatically.
 

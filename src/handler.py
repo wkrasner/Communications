@@ -661,26 +661,24 @@ def lambda_handler(event, context):
     raw = event.get("body") or ""
     raw_bytes = base64.b64decode(raw) if event.get("isBase64Encoded") else raw.encode()
 
-    if path == "/telnyx" and method == "POST":
-        if not verify_signature(raw_bytes, headers):
-            return respond(401, {"error": "bad signature"})
-        try:
-            handle_webhook(json.loads(raw_bytes))
-        except Exception as e:  # always 200 so Telnyx does not retry into a live call
-            print(f"webhook error: {e!r}")
-        return respond(200, {"ok": True})
-
-    if path == "/gateway" and method == "POST":
-        # Header or query string: the Android gateway app can set a URL but
-        # not always a custom header.
-        token = (headers.get("x-gateway-secret")
-                 or (event.get("queryStringParameters") or {}).get("k") or "")
-        if not GATEWAY_SECRET or not hmac.compare_digest(token, GATEWAY_SECRET):
+    if path in ("/telnyx", "/gateway") and method == "POST":
+        # Either URL accepts either sender, so pointing Telnyx at /gateway or
+        # the phone app at /telnyx still works. What decides is how the request
+        # authenticates, and the payload decides how it is read.
+        signed = verify_signature(raw_bytes, headers)
+        secret = (headers.get("x-gateway-secret")
+                  or (event.get("queryStringParameters") or {}).get("k") or "")
+        shared = bool(GATEWAY_SECRET) and hmac.compare_digest(secret, GATEWAY_SECRET)
+        if not (signed or shared):
             return respond(401, {"error": "unauthorized"})
         try:
-            on_gateway_post(json.loads(raw_bytes))
-        except Exception as e:
-            print(f"gateway error: {e!r}")
+            body = json.loads(raw_bytes)
+            if signed and isinstance(body.get("data"), dict):
+                handle_webhook(body)
+            else:
+                on_gateway_post(body)
+        except Exception as e:  # always 200 so Telnyx does not retry into a live call
+            print(f"webhook error on {path}: {e!r}")
         return respond(200, {"ok": True})
 
     if path == "/manifest.webmanifest" and method == "GET":
