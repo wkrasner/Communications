@@ -662,7 +662,10 @@ def admin_api(method, path, query, body):
             saved += 1
         return 200, {"saved": saved, "skipped": skipped}
     if path == "/admin/api/numbers" and method == "DELETE":
-        num = normalize(query.get("number"))
+        raw = (query.get("number") or "").strip()
+        # Fall back to the raw value: an entry whose number does not normalize
+        # could otherwise never be removed.
+        num = normalize(raw) or raw
         if not num:
             return 400, {"error": "bad number"}
         db_delete(f"NUM#{num}")

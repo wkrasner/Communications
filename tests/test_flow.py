@@ -585,3 +585,25 @@ class ThreadActions(Base):
 
     def test_bad_action_is_refused(self):
         self.assertEqual(self.post("+12155551234", "burn")[0], 400)
+
+
+class DeleteOddNumbers(Base):
+    def delete(self, number):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "DELETE"}},
+                              "rawPath": "/admin/api/numbers",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": {"number": number},
+                              "body": ""}, None)
+        return r["statusCode"]
+
+    def test_entry_that_does_not_normalise_can_still_be_removed(self):
+        """A short code or extension never normalises, so it was undeletable."""
+        self.db["NUM#2200"] = {"pk": "NUM#2200", "number": "2200", "status": "allow"}
+        self.assertEqual(self.delete("2200"), 200)
+        self.assertNotIn("NUM#2200", self.db)
+
+    def test_normal_number_still_deletes(self):
+        self.db["NUM#+16095550123"] = {"pk": "NUM#+16095550123", "status": "allow"}
+        self.assertEqual(self.delete("609-555-0123"), 200)
+        self.assertNotIn("NUM#+16095550123", self.db)
