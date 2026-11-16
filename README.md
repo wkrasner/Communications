@@ -10,6 +10,12 @@ Screens calls to two Telnyx numbers (one fed by the cell, one by Google Voice) b
 
 Texts land in the same panel, grouped by contact, with a reply box.
 
+Threads can be archived (they move to an Archived tab and come back with Unarchive) or deleted outright. Deleting removes every call and text with that contact from the table; voicemail and call recordings stay in S3.
+
+The pencil button composes a new message to a number with no history. That always goes out from the cell, because Google Voice's email relay is a reply address that only exists once someone has texted you.
+
+Contact names come from the Numbers screen. There is no Google Contacts API call — an app password only reaches mail — so instead you export from contacts.google.com as Google CSV and import the file there. Importing can either just label callers (`name`, still screened) or also allow them through.
+
 The panel follows the screen it is on. On a phone it is a conversation list you tap into, with a thread view and a reply box pinned to the bottom; on a wide screen every contact is expanded with calls on the left and texts on the right. Rotating the phone or resizing the window switches between the two live. It is installable: open `/admin` in Chrome on Android, then "Add to Home screen", and it runs full-screen with its own icon. The inbox re-reads itself every 30 seconds while in the foreground, and pauses that while you are typing a reply.
 
 - **Cell texts** arrive from a gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number. Two apps are supported and the inbound handler accepts either payload shape: SimpApp's *SMS Gateway API* (on the Play Store, set `SMS_API_KEY`) and capcom6's *SMS Gateway* (sideloaded, set `SMS_GATEWAY_USER`/`SMS_GATEWAY_PASS`). The Play Store one relays through the vendor's Firebase; the sideloaded one talks straight to this Lambda.

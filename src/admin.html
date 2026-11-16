@@ -59,6 +59,9 @@
   .row .grow { flex: 1; min-width: 0; }
   .row .ttl { font-weight: 600; }
   .row .prev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* A heavy rule so one number's traffic never reads as the next one's. */
+  .sep { height: 4px; background: var(--accent); opacity: .85; }
+  .chev { font-size: 13px; opacity: .6; width: 14px; flex-shrink: 0; }
 
   .thread { padding: 12px; }
   .pane h3 {
@@ -86,7 +89,8 @@
   /* Wide screens: every contact on one page, calls and texts side by side. */
   @media (min-width: 721px) {
     header, .bar, main, .composer { max-width: 1100px; margin-inline: auto; width: 100%; }
-    .contact { border: 1px solid var(--line); border-radius: 11px; margin: 0 12px 12px; overflow: hidden; }
+    .contact { border: 1px solid var(--line); border-radius: 11px; margin: 0 12px 14px; overflow: hidden; }
+    .contact { border-top: 4px solid var(--accent); }
     .chead { display: flex; gap: 9px; align-items: center; padding: 10px 12px; background: var(--soft); }
     .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
     .pane { background: Canvas; padding: 11px; }
@@ -107,6 +111,7 @@
 <header id="hdr" hidden>
   <button class="icon" id="back" onclick="closeThread()" hidden>&larr;</button>
   <h1 id="title">Communications</h1>
+  <button class="icon" id="newmsg" onclick="newMessage()" title="New message">&#9998;</button>
   <button class="icon" onclick="refresh()" title="Refresh">&#8635;</button>
   <button class="icon" onclick="toggleMenu()" title="Menu">&#8942;</button>
 </header>
@@ -114,6 +119,7 @@
 <div class="bar" id="menu" hidden>
   <button id="tabInbox" onclick="show('inbox')">Inbox</button>
   <button id="tabNums" onclick="show('nums')">Numbers</button>
+  <button id="tabArch" onclick="show('archived')">Archived</button>
   <button onclick="showStatus()">Status</button>
   <button onclick="signOut()" style="margin-left:auto">Sign out</button>
 </div>
@@ -126,6 +132,21 @@
 
 <main id="main" hidden></main>
 
+<div id="compose" hidden style="position:fixed;inset:0;background:Canvas;z-index:9;
+     display:flex;flex-direction:column">
+  <header>
+    <button class="icon" onclick="closeCompose()">&larr;</button>
+    <h1>New message</h1>
+  </header>
+  <div style="padding:12px;display:grid;gap:10px;overflow-y:auto">
+    <input id="newTo" placeholder="Phone number" inputmode="tel" autocomplete="tel">
+    <textarea id="newText" rows="4" placeholder="Message"></textarea>
+    <div class="muted">Goes out from your cell. Google Voice can only reply inside a
+      thread someone else started, so a new conversation can't be sent as 820-5401.</div>
+    <button class="primary" onclick="sendNew()">Send</button>
+  </div>
+</div>
+
 <div class="composer" id="composer" hidden>
   <input id="reply" placeholder="Reply…" onkeydown="if(event.key==='Enter')sendText()">
   <button class="primary" onclick="sendText()">Send</button>
@@ -136,7 +157,7 @@ let token = '';
 try { token = localStorage.getItem('adminToken') || ''; } catch (e) {}
 
 let calls = [], msgs = [], officeText = '';
-let tab = 'inbox', openKey = null, expanded = new Set();
+let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
 const narrow = window.matchMedia('(max-width: 720px)');
 
 const $ = id => document.getElementById(id);
@@ -166,7 +187,7 @@ function saveToken() {
 function signOut() {
   token = '';
   try { localStorage.removeItem('adminToken'); } catch (e) {}
-  for (const id of ['hdr', 'menu', 'searchbar', 'main', 'composer']) $(id).hidden = true;
+  for (const id of ['hdr', 'menu', 'searchbar', 'main', 'composer', 'compose']) $(id).hidden = true;
   $('login').hidden = false;
 }
 function toggleMenu() { $('menu').hidden = !$('menu').hidden; }
@@ -175,12 +196,14 @@ function show(t) {
   tab = t; openKey = null;
   $('menu').hidden = true;
   $('tabInbox').className = t === 'inbox' ? 'on' : '';
+  $('tabArch').className = t === 'archived' ? 'on' : '';
   $('tabNums').className = t === 'nums' ? 'on' : '';
-  t === 'inbox' ? refresh() : loadNums();
+  t === 'nums' ? loadNums() : refresh();
 }
 
 async function refresh() {
-  if (tab !== 'inbox') return loadNums();
+  if (tab === 'nums') return loadNums();
+  if (tab === 'status') return;
   say('Loading…');
   try {
     const [c, m, o] = await Promise.all([
@@ -210,6 +233,12 @@ function groups() {
     g.msgs.some(m => (m.text || '').toLowerCase().includes(q)) ||
     g.calls.some(c => ((c.result || '') + ' ' + (c.transcript || '') + ' ' +
                        (c.vm_transcript || '')).toLowerCase().includes(q)));
+  const wantArchived = tab === 'archived';
+  list = list.filter(g => {
+    const all = [...g.calls, ...g.msgs];
+    // A thread counts as archived when everything in it is.
+    return (all.length > 0 && all.every(i => !!i.archived)) === wantArchived;
+  });
   for (const g of list) {
     g.calls.sort((a, b) => b.ts.localeCompare(a.ts));
     g.msgs.sort((a, b) => a.ts.localeCompare(b.ts));
@@ -259,7 +288,7 @@ function listRow(g) {
 }
 
 function render() {
-  if (tab !== 'inbox') return;
+  if (tab !== 'inbox' && tab !== 'archived') return;
   const list = groups();
   const mobile = narrow.matches;
 
@@ -276,15 +305,26 @@ function render() {
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
             <button class="small" onclick="mark('${esc(g.key)}','allow')">Allow</button>
             <button class="small" onclick="mark('${esc(g.key)}','block')">Block</button>
+            <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
+            <button class="small" onclick="thread('${esc(g.key)}','delete')">Delete</button>
             ${g.flagged && officeText ? `<button class="small" onclick="useOffice()">Office referral</button>` : ''}
           </div>` : ''}
-        <div class="pane"><h3>Texts</h3>${textsHtml(g)}</div>
-        <div class="pane" style="margin-top:18px"><h3>Calls</h3>${callsHtml(g)}</div>
+        <div class="pane">
+          <h3 onclick="section('texts')" style="cursor:pointer">
+            ${shut.has('texts') ? '&#9656;' : '&#9662;'} Texts (${g.msgs.length})</h3>
+          ${shut.has('texts') ? '' : textsHtml(g)}
+        </div>
+        <div class="sep" style="margin:14px -12px"></div>
+        <div class="pane">
+          <h3 onclick="section('calls')" style="cursor:pointer">
+            ${shut.has('calls') ? '&#9656;' : '&#9662;'} Calls (${g.calls.length})</h3>
+          ${shut.has('calls') ? '' : callsHtml(g)}
+        </div>
       </div>`;
     return;
   }
 
-  $('title').textContent = 'Communications';
+  $('title').textContent = tab === 'archived' ? 'Archived' : 'Communications';
   $('back').hidden = true;
   $('searchbar').hidden = false;
   $('composer').hidden = true;
@@ -293,13 +333,14 @@ function render() {
     $('main').innerHTML = '<p class="muted" style="padding:16px">Nothing yet.</p>';
     return;
   }
-  if (mobile) { $('main').innerHTML = list.map(listRow).join(''); return; }
+  if (mobile) { $('main').innerHTML = list.map(listRow).join('<div class="sep"></div>'); return; }
 
   $('main').innerHTML = list.map(g => {
-    const isOpen = expanded.has(g.key) || list.length <= 3;
+    const isOpen = expanded.has(g.key);
     return `
     <div class="contact">
       <div class="chead" onclick="toggle('${esc(g.key)}')" style="cursor:pointer">
+        <span class="chev">${isOpen ? '&#9662;' : '&#9656;'}</span>
         <div style="flex:1"><b>${esc(g.name || g.key)}</b>
           ${g.name ? `<span class="muted"> ${esc(g.key)}</span>` : ''}
           ${g.flagged ? '<span class="tag flag">medical</span>' : ''}</div>
@@ -307,7 +348,9 @@ function render() {
           ${g.msgs.length} text${g.msgs.length === 1 ? '' : 's'} · ${when(g.last)}</span>
         ${g.key.startsWith('+') ? `
           <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','allow')">Allow</button>
-          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">Block</button>` : ''}
+          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">Block</button>
+          <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
+          <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','delete')">Delete</button>` : ''}
       </div>
       ${isOpen ? `
       <div class="panes">
@@ -327,6 +370,27 @@ function render() {
   }).join('');
 }
 
+function newMessage() {
+  $('menu').hidden = true;
+  $('newTo').value = ''; $('newText').value = '';
+  $('compose').hidden = false;
+  $('newTo').focus();
+}
+function closeCompose() { $('compose').hidden = true; }
+async function sendNew() {
+  const to = $('newTo').value.trim(), text = $('newText').value.trim();
+  if (!to || !text) { say('Need a number and a message.'); return; }
+  say('Sending…');
+  try {
+    const r = await api('POST', 'send', {to, text, via: 'cell'});
+    if (!r.ok) { say('Not sent — ' + r.note); return; }
+    closeCompose();
+    say(r.note);
+    await refresh();
+  } catch (e) { say('Not sent — ' + e.message); }
+}
+
+function section(which) { shut.has(which) ? shut.delete(which) : shut.add(which); render(); }
 function openThread(key) { openKey = key; render(); }
 function closeThread() { openKey = null; render(); }
 function toggle(key) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); }
@@ -352,6 +416,21 @@ async function play(key, btn) {
   a.controls = true; a.src = r.url; a.autoplay = true; a.style.width = '100%';
   btn.replaceWith(a);
 }
+async function thread(contact, action) {
+  if (action === 'delete' &&
+      !confirm('Delete every call and text with ' + contact +
+               ' permanently? Voicemail recordings stay in S3.')) return;
+  say(action === 'delete' ? 'Deleting…' : 'Working…');
+  try {
+    const r = await api('POST', 'thread', {contact, action});
+    openKey = null;
+    await refresh();
+    say(r.deleted != null ? `Deleted ${r.deleted} item(s).`
+        : r.archived != null ? `Archived ${r.archived} item(s).`
+        : `Restored ${r.restored} item(s).`);
+  } catch (e) { say('Failed — ' + e.message); }
+}
+
 async function mark(number, status) {
   await api('POST', 'numbers', {numbers: [{number, status}]});
   say(number + ' → ' + status);
@@ -393,7 +472,18 @@ async function loadNums() {
       <textarea id="bulk" rows="4" placeholder="One per line: number, name&#10;609-555-0123, Dr. Smith"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="primary" onclick="bulkAdd('allow')">Add as allowed</button>
+        <button onclick="bulkAdd('name')">Add names only</button>
         <button onclick="bulkAdd('block')">Add as blocked</button>
+      </div>
+      <div style="border-top:1px solid var(--line);padding-top:10px;display:grid;gap:8px">
+        <b style="font-size:14px">Import Google Contacts</b>
+        <div class="muted">contacts.google.com &rarr; Export &rarr; Google CSV, then pick the file.
+          Names label your callers; allowing them also skips the press-1 screen.</div>
+        <label style="display:flex;gap:7px;align-items:center">
+          <input type="checkbox" id="impAllow" checked style="width:auto">
+          <span>Also allow them through</span>
+        </label>
+        <input type="file" id="csv" accept=".csv,text/csv" onchange="importCsv()">
       </div>
     </div>` + nums.map(n => `
     <div class="row">
@@ -415,6 +505,77 @@ async function bulkAdd(status) {
   $('bulk').value = skipped.join('\n');
   say(`Saved ${r.saved}` + (skipped.length ? `, ${skipped.length} not recognised (left in the box)` : ''));
 }
+/** Minimal RFC4180 reader: Google's export quotes fields containing commas. */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim()));
+}
+
+async function importCsv() {
+  const file = $('csv').files[0];
+  if (!file) return;
+  say('Reading ' + file.name + '…');
+  let rows;
+  try { rows = parseCsv(await file.text()); }
+  catch (e) { say('Could not read that file — ' + e.message); return; }
+  if (rows.length < 2) { say('That file has no contacts in it.'); return; }
+
+  const head = rows[0].map(h => h.trim().toLowerCase());
+  const phoneCols = head.map((h, i) => /phone/.test(h) && /value/.test(h) ? i : -1).filter(i => i >= 0);
+  const nameCol = head.indexOf('name');
+  const firstCol = head.indexOf('first name'), lastCol = head.indexOf('last name');
+  const orgCol = head.findIndex(h => /organization.*name/.test(h));
+  if (!phoneCols.length) {
+    say('No phone columns found — export as "Google CSV" rather than vCard or Outlook.');
+    return;
+  }
+
+  const status = $('impAllow').checked ? 'allow' : 'name';
+  const seen = new Set(), numbers = [];
+  for (const r of rows.slice(1)) {
+    const name = ((nameCol >= 0 ? r[nameCol] : '') ||
+                  [r[firstCol] || '', r[lastCol] || ''].join(' ') ||
+                  (orgCol >= 0 ? r[orgCol] : '')).trim();
+    for (const c of phoneCols) {
+      // One cell can hold several numbers separated by ":::".
+      for (const raw of String(r[c] || '').split(/:::|;/)) {
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length < 10 || seen.has(digits)) continue;
+        seen.add(digits);
+        numbers.push({number: raw.trim(), name, status});
+      }
+    }
+  }
+  if (!numbers.length) { say('No usable phone numbers in that file.'); return; }
+
+  say(`Importing ${numbers.length}…`);
+  let saved = 0, skipped = 0;
+  for (let i = 0; i < numbers.length; i += 200) {
+    const r = await api('POST', 'numbers', {numbers: numbers.slice(i, i + 200)});
+    saved += r.saved || 0;
+    skipped += (r.skipped || []).length;
+    say(`Importing ${Math.min(i + 200, numbers.length)} of ${numbers.length}…`);
+  }
+  $('csv').value = '';
+  await loadNums();
+  say(`Imported ${saved} number${saved === 1 ? '' : 's'}` +
+      (skipped ? `, ${skipped} not recognised` : '') +
+      (status === 'allow' ? ' — they now ring straight through.' : ' — names only, still screened.'));
+}
+
 async function removeNum(number) {
   await api('DELETE', 'numbers?number=' + encodeURIComponent(number));
   loadNums();

@@ -468,3 +468,111 @@ class Credentials(Base):
         finally:
             os.environ.pop("GMAIL_APP_PASSWORD"); os.environ.pop("GMAIL_USER")
             importlib.reload(h)
+
+
+class NameOnlyStatus(Base):
+    def save(self, rows):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/numbers",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps({"numbers": rows})}, None)
+        return json.loads(r["body"])
+
+    def test_name_only_contact_is_stored(self):
+        out = self.save([{"number": "609-555-0123", "name": "Dr Smith", "status": "name"}])
+        self.assertEqual(out["saved"], 1)
+        self.assertEqual(self.db["NUM#+16095550123"]["status"], "name")
+
+    def test_name_only_caller_is_still_screened_but_labelled(self):
+        self.save([{"number": "+12155551234", "name": "Dr Smith", "status": "name"}])
+        self.inbound()
+        self.assertEqual(self.last()[1], "answer")        # challenged, not rung through
+        rec = self.db["CALL#S1"]
+        self.assertEqual((rec["name"], rec["list"]), ("Dr Smith", "name"))
+
+    def test_rubbish_status_is_still_refused(self):
+        out = self.save([{"number": "609-555-0123", "status": "vip"}])
+        self.assertEqual(out["saved"], 0)
+
+
+class NewConversation(Base):
+    def setUp(self):
+        super().setUp()
+        h.SMS_API_KEY = "KEY"
+        self.posted, self.real = [], h.urllib.request.urlopen
+
+        def fake(req, timeout=0):
+            self.posted.append(req)
+            return type("R", (), {"read": lambda s: b"{}", "__enter__": lambda s: s,
+                                  "__exit__": lambda s, *a: None})()
+        h.urllib.request.urlopen = fake
+
+    def tearDown(self):
+        h.urllib.request.urlopen = self.real
+        h.SMS_API_KEY = ""
+
+    def test_number_with_no_history_sends_from_the_cell(self):
+        ok, note = h.send_text("+12155557777", "hello", via="cell")
+        self.assertTrue(ok, note)
+        self.assertEqual(json.loads(self.posted[0].data)["phoneNumber"], "+12155557777")
+
+    def test_via_cell_overrides_an_existing_google_voice_thread(self):
+        h.store_message("gv-1", "+12155551234", "", "GV", "hi", src="gv",
+                        relay="r@txt.voice.google.com")
+        ok, note = h.send_text("+12155551234", "hello", via="cell")
+        self.assertTrue(ok, note)
+        self.assertIn("cell", note)
+
+    def test_google_voice_without_a_relay_is_refused_clearly(self):
+        h.GMAIL_USER, h.GMAIL_APP_PASSWORD = "me@gmail.com", "pw"
+        try:
+            ok, note = h.send_text("+12155558888", "hello", via="gv")
+        finally:
+            h.GMAIL_USER = h.GMAIL_APP_PASSWORD = ""
+        self.assertFalse(ok)
+        self.assertIn("relay", note)
+
+
+class ThreadActions(Base):
+    def post(self, contact, action):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/thread",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps({"contact": contact, "action": action})}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def populate(self):
+        self.inbound()                       # a call from +12155551234
+        h.store_message("m1", "+12155551234", "", "Cell", "hi", src="cell")
+        h.store_message("m2", "+19995550000", "", "Cell", "other", src="cell")
+
+    def test_archive_marks_only_that_thread(self):
+        self.populate()
+        code, out = self.post("+12155551234", "archive")
+        self.assertEqual(code, 200)
+        self.assertEqual(out["archived"], 2)
+        self.assertTrue(self.db["CALL#S1"]["archived"])
+        self.assertTrue(self.db["MSG#m1"]["archived"])
+        self.assertNotIn("archived", self.db["MSG#m2"])
+
+    def test_unarchive_restores(self):
+        self.populate()
+        self.post("+12155551234", "archive")
+        code, out = self.post("+12155551234", "unarchive")
+        self.assertEqual(out["restored"], 2)
+        self.assertFalse(self.db["MSG#m1"]["archived"])
+
+    def test_delete_removes_only_that_thread(self):
+        self.populate()
+        code, out = self.post("+12155551234", "delete")
+        self.assertEqual(out["deleted"], 2)
+        self.assertNotIn("CALL#S1", self.db)
+        self.assertNotIn("MSG#m1", self.db)
+        self.assertIn("MSG#m2", self.db)
+
+    def test_bad_action_is_refused(self):
+        self.assertEqual(self.post("+12155551234", "burn")[0], 400)

@@ -488,9 +488,17 @@ def latest_thread_route(contact):
     return ("cell", "")
 
 
-def send_text(contact, text):
-    """Send as whichever of his numbers the thread belongs to."""
+def send_text(contact, text, via=""):
+    """Send as whichever line the thread belongs to, or the one asked for.
+
+    A brand new conversation can only go out from the cell: Google Voice's
+    email relay is a reply address that exists only once they have texted.
+    """
     src, relay = latest_thread_route(contact)
+    if via in ("cell", "gv"):
+        src = via
+        if via == "cell":
+            relay = ""
     if src == "gv":
         if not (GMAIL_USER and GMAIL_APP_PASSWORD and relay):
             return False, "no Gmail credentials or no relay address for this thread"
@@ -603,10 +611,25 @@ def admin_api(method, path, query, body):
         text = (body.get("text") or "").strip()
         if not to or not text:
             return 400, {"error": "need a number and some text"}
-        ok, note = send_text(to, text)
+        ok, note = send_text(to, text, (body.get("via") or "").strip())
         return (200 if ok else 502), {"ok": ok, "note": note}
     if path == "/admin/api/office-reply" and method == "GET":
         return 200, {"text": office_reply()}
+    if path == "/admin/api/thread" and method == "POST":
+        contact = normalize(body.get("contact"))
+        action = body.get("action")
+        if not contact or action not in ("archive", "unarchive", "delete"):
+            return 400, {"error": "need a contact and archive, unarchive or delete"}
+        items = [i for i in db_list("CALLS", 500) + db_list("MSGS", 500)
+                 if (i.get("contact") or i.get("from")) == contact]
+        if action == "delete":
+            for i in items:
+                db_delete(i["pk"])
+            return 200, {"deleted": len(items)}
+        for i in items:
+            db_update(i["pk"], archived=(action == "archive"))
+        return 200, {"archived" if action == "archive" else "restored": len(items)}
+
     if path == "/admin/api/status" and method == "GET":
         gv = db_get("STATE#gvpoll") or {}
         return 200, {
@@ -628,7 +651,8 @@ def admin_api(method, path, query, body):
         for row in body.get("numbers", []):
             num = normalize(row.get("number"))
             status = row.get("status")
-            if not num or status not in ("allow", "block"):
+            # "name" labels a caller without letting them skip the screen.
+            if not num or status not in ("allow", "block", "name"):
                 skipped.append(row.get("number"))
                 continue
             db_put({
