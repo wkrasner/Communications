@@ -596,7 +596,11 @@ def sync_contacts():
                 import gcontacts
                 token = gcontacts.access_token(
                     GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, row["refresh_token"])
-                pairs = gcontacts.connections(token)
+                saved = gcontacts.connections(token)
+                other = gcontacts.other_contacts(token)
+                pairs = saved + other
+                status["saved"] = len(saved)
+                status["other"] = len(other)
             except Exception as e:
                 status["error"] = f"{type(e).__name__}: {e}"[:300]
                 print(f"contact sync failed: {status['error']}")

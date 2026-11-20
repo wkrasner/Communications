@@ -810,6 +810,8 @@ class GoogleContacts(Base):
         self.fake.exchange_code = lambda *a: {"refresh_token": "RT"}
         self.fake.access_token = lambda *a: "AT"
         self.fake.connections = lambda token, page_limit=20: self.pairs
+        self.fake.other_contacts = lambda token, page_limit=20: self.other
+        self.other = []
         self.pairs = [("+1 215 555 1234", "Mom"), ("609-555-0123", "Dr Smith")]
         sys.modules["gcontacts"] = self.fake
 
@@ -863,6 +865,13 @@ class GoogleContacts(Base):
         self.db["STATE#gtoken"] = {"refresh_token": "RT"}
         out = h.sync_contacts()
         self.assertEqual((out["written"], out["skipped"]), (1, 2))
+
+    def test_auto_collected_contacts_are_merged_in(self):
+        self.other = [("+19175550000", "Taxi")]
+        self.db["STATE#gtoken"] = {"refresh_token": "RT"}
+        out = h.sync_contacts()
+        self.assertEqual((out["saved"], out["other"]), (2, 1))
+        self.assertEqual(self.db["NUM#+19175550000"]["name"], "Taxi")
 
     def test_sync_without_a_token_says_so_rather_than_failing_silently(self):
         out = h.sync_contacts()

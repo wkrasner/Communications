@@ -18,6 +18,8 @@ Contact names come from Google Contacts, synced over the People API every 12 hou
 
 Publish the OAuth consent screen to **Production**. While it sits in Testing, Google expires the refresh token after seven days and the sync dies quietly every week. You will click past an "unverified app" warning, which is expected — verification only matters for putting an app in front of other people.
 
+Two collections are read: contacts you saved (`people/me/connections`) and the ones Google collected from your mail ("Other contacts"), which are a separate endpoint behind `contacts.other.readonly`. Most people have far more of the second kind, so leaving it out makes a sync look broken. If that scope was never granted the sync still completes with the saved contacts alone.
+
 A sync never overwrites an allow or block you have made; it only fills in names, and files contacts it has not seen before as `name` (labelled, still screened). The CSV import on the Numbers screen still works for anything outside Google Contacts.
 
 Text size is adjustable: A− and A+ in the ⋮ menu, 13px to 26px, remembered per device in localStorage. Everything scales with it, since no font size is pinned in pixels — except the form fields, which stay at 16px or above so phone browsers do not zoom in when you tap them.

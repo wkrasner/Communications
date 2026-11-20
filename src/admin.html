@@ -500,7 +500,8 @@ async function showStatus() {
          : !s.contacts_connected ? 'Not connected.'
          : g2.error ? 'Last sync FAILED — ' + g2.error
          : g2.note ? 'Connected. ' + g2.note
-         : `Connected — ${g2.written} name(s) written from ${g2.contacts} number(s) at ${when(g2.ts)}`}</div>
+         : `Connected — ${g2.written} name(s) written from ${g2.contacts} number(s)
+             (${g2.saved ?? '?'} saved, ${g2.other ?? '?'} auto-collected) at ${when(g2.ts)}`}</div>
        ${s.has_google_client ? `<div style="display:flex;gap:7px;margin-top:7px;flex-wrap:wrap">
          <button class="small" onclick="connectContacts()">${s.contacts_connected ? 'Reconnect' : 'Connect'}</button>
          ${s.contacts_connected ? '<button class="small" onclick="syncContacts()">Sync now</button>' : ''}

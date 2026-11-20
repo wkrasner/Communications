@@ -14,7 +14,11 @@ import urllib.request
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 PEOPLE_URL = "https://people.googleapis.com/v1/people/me/connections"
-SCOPE = "https://www.googleapis.com/auth/contacts.readonly"
+OTHER_URL = "https://people.googleapis.com/v1/otherContacts"
+# Saved contacts and the ones Google collected from mail are separate
+# collections behind separate scopes.
+SCOPE = ("https://www.googleapis.com/auth/contacts.readonly "
+         "https://www.googleapis.com/auth/contacts.other.readonly")
 
 
 def _post(url, data):
@@ -80,15 +84,46 @@ def connections(token, page_limit=20):
         if page:
             params["pageToken"] = page
         body = _get(PEOPLE_URL + "?" + urllib.parse.urlencode(params), token)
-        for person in body.get("connections", []):
-            names = person.get("names") or []
-            orgs = person.get("organizations") or []
-            name = (names[0].get("displayName") if names else "") or \
-                   (orgs[0].get("name") if orgs else "")
-            for phone in person.get("phoneNumbers") or []:
-                number = phone.get("canonicalForm") or phone.get("value") or ""
-                if number:
-                    out.append((number, (name or "").strip()[:80]))
+        out.extend(_pairs(body.get("connections", [])))
+        page = body.get("nextPageToken")
+        pages += 1
+        if not page:
+            break
+    return out
+
+
+def _pairs(people):
+    out = []
+    for person in people:
+        names = person.get("names") or []
+        orgs = person.get("organizations") or []
+        name = (names[0].get("displayName") if names else "") or \
+               (orgs[0].get("name") if orgs else "")
+        for phone in person.get("phoneNumbers") or []:
+            number = phone.get("canonicalForm") or phone.get("value") or ""
+            if number:
+                out.append((number, (name or "").strip()[:80]))
+    return out
+
+
+def other_contacts(token, page_limit=20):
+    """People Google collected from mail, which `connections` does not return.
+
+    Returns [] rather than raising if the scope was not granted — the saved
+    contacts are still worth having on their own.
+    """
+    out, page, pages = [], None, 0
+    while pages < page_limit:
+        params = {"readMask": "names,phoneNumbers", "pageSize": 200}
+        if page:
+            params["pageToken"] = page
+        try:
+            body = _get(OTHER_URL + "?" + urllib.parse.urlencode(params), token)
+        except RuntimeError as e:
+            if " 403" in str(e) or " 400" in str(e):
+                return out
+            raise
+        out.extend(_pairs(body.get("otherContacts", [])))
         page = body.get("nextPageToken")
         pages += 1
         if not page:
