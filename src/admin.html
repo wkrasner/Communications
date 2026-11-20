@@ -10,7 +10,7 @@
 <style>
   :root {
     color-scheme: light dark;
-    --line: #8884; --soft: #8881; --accent: #2563eb;
+    --line: #8884; --soft: #8881; --accent: #2563eb; --them: #0f766e;
     --pad: env(safe-area-inset-bottom, 0px);
     --fs: 16px;   /* set by the A-/A+ control, remembered per device */
   }
@@ -76,7 +76,8 @@
   .item:last-child { border-bottom: 0; }
   .bubble {
     display: inline-block; padding: 7px 11px; border-radius: 14px;
-    background: var(--soft); max-width: 88%; white-space: pre-wrap; word-wrap: break-word;
+    background: var(--them); color: #fff;
+    max-width: 88%; white-space: pre-wrap; word-wrap: break-word;
   }
   .out { text-align: right; }
   .out .bubble { background: var(--accent); color: #fff; text-align: left; }
@@ -277,7 +278,7 @@ function groups() {
   });
   for (const g of list) {
     g.calls.sort((a, b) => b.ts.localeCompare(a.ts));
-    g.msgs.sort((a, b) => a.ts.localeCompare(b.ts));
+    g.msgs.sort((a, b) => b.ts.localeCompare(a.ts));
     g.flagged = g.msgs.some(m => m.medical);
   }
   return list.sort((a, b) => b.last.localeCompare(a.last));
@@ -309,7 +310,7 @@ function textsHtml(g) {
 }
 
 function listRow(g) {
-  const lastMsg = g.msgs[g.msgs.length - 1];
+  const lastMsg = g.msgs[0];
   const preview = lastMsg ? (lastMsg.dir === 'out' ? 'You: ' : '') + (lastMsg.text || '')
                           : `${g.calls.length} call${g.calls.length === 1 ? '' : 's'}`;
   return `

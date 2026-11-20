@@ -954,3 +954,24 @@ class ButtonIcons(Base):
                             ("&#9654;", "Voicemail"), ("&#10148;", "Send"),
                             ("&#9993;", "Inbox"), ("&#9881;", "Status")]:
             self.assertIn(f"{glyph} {word}", page, word)
+
+
+class MessageOrder(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_texts_are_newest_first_like_the_calls(self):
+        page = self.page()
+        self.assertIn("g.msgs.sort((a, b) => b.ts.localeCompare(a.ts))", page)
+        self.assertIn("g.calls.sort((a, b) => b.ts.localeCompare(a.ts))", page)
+
+    def test_preview_follows_the_newest_message(self):
+        self.assertIn("const lastMsg = g.msgs[0];", self.page())
+
+    def test_the_two_sides_are_different_colours(self):
+        css = self.page().split("</style>")[0]
+        self.assertIn("--them: #0f766e", css)
+        self.assertIn("background: var(--them)", css)
+        self.assertIn(".out .bubble { background: var(--accent)", css)
