@@ -6,6 +6,7 @@ the panel hands you a consent URL, Google redirects back to /oauth/callback,
 and the refresh token it returns is stored and reused from then on.
 """
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,19 +52,34 @@ def access_token(client_id, client_secret, refresh_token):
         "client_secret": client_secret, "grant_type": "refresh_token"})["access_token"]
 
 
+def _get(url, token, attempts=3):
+    """GET with the error body surfaced, and a retry for Google's 5xx blips."""
+    last = None
+    for attempt in range(attempts):
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:400].decode("utf-8", "replace")
+            last = RuntimeError(f"People API {e.code}: {detail}")
+            if e.code < 500:
+                raise last
+            time.sleep(1 + attempt)
+    raise last
+
+
 def connections(token, page_limit=20):
     """Every contact with a phone number, as (number, name) pairs."""
     out, page, pages = [], None, 0
     while pages < page_limit:
+        # Deliberately plain: no sort order, a modest page size. Both have
+        # been seen to provoke 500s from this endpoint.
         params = {"personFields": "names,phoneNumbers,organizations",
-                  "pageSize": 1000, "sortOrder": "LAST_MODIFIED_DESCENDING"}
+                  "pageSize": 200}
         if page:
             params["pageToken"] = page
-        req = urllib.request.Request(
-            PEOPLE_URL + "?" + urllib.parse.urlencode(params),
-            headers={"Authorization": f"Bearer {token}"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            body = json.loads(r.read())
+        body = _get(PEOPLE_URL + "?" + urllib.parse.urlencode(params), token)
         for person in body.get("connections", []):
             names = person.get("names") or []
             orgs = person.get("organizations") or []
