@@ -62,6 +62,7 @@
   .row .prev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* A heavy rule so one number's traffic never reads as the next one's. */
   .sep { height: 4px; background: var(--accent); opacity: .85; }
+  .pick { width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--accent); }
   .chev { font-size: .82em; opacity: .6; width: 14px; flex-shrink: 0; }
 
   .thread { padding: 12px; }
@@ -134,6 +135,14 @@
   <input id="search" placeholder="Search calls and texts…" oninput="render()">
 </div>
 
+<div class="bar" id="selbar" hidden>
+  <span id="selcount" class="muted" style="flex:1;align-self:center"></span>
+  <button class="small" onclick="batch('archive')">Archive</button>
+  <button class="small" onclick="batch('block')">Block</button>
+  <button class="small" onclick="batch('delete')">Delete</button>
+  <button class="small" onclick="clearSel()">Cancel</button>
+</div>
+
 <div id="msg"></div>
 
 <main id="main" hidden></main>
@@ -164,6 +173,7 @@ try { token = localStorage.getItem('adminToken') || ''; } catch (e) {}
 
 let calls = [], msgs = [], officeText = '';
 let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
+let picked = new Set();
 const narrow = window.matchMedia('(max-width: 720px)');
 
 const FS_MIN = 13, FS_MAX = 26;
@@ -214,7 +224,7 @@ function signOut() {
 function toggleMenu() { $('menu').hidden = !$('menu').hidden; }
 
 function show(t) {
-  tab = t; openKey = null;
+  tab = t; openKey = null; picked.clear(); showSel();
   $('menu').hidden = true;
   $('tabInbox').className = t === 'inbox' ? 'on' : '';
   $('tabArch').className = t === 'archived' ? 'on' : '';
@@ -298,14 +308,16 @@ function listRow(g) {
   const preview = lastMsg ? (lastMsg.dir === 'out' ? 'You: ' : '') + (lastMsg.text || '')
                           : `${g.calls.length} call${g.calls.length === 1 ? '' : 's'}`;
   return `
-    <button class="row" onclick="openThread('${esc(g.key)}')">
-      <div class="grow">
+    <div class="row">
+      <input type="checkbox" class="pick" ${picked.has(g.key) ? 'checked' : ''}
+             onchange="pick('${esc(g.key)}', this.checked)">
+      <div class="grow" style="cursor:pointer" onclick="openThread('${esc(g.key)}')">
         <div class="ttl">${esc(g.name || g.key)}
           ${g.flagged ? '<span class="tag flag">medical</span>' : ''}</div>
         <div class="prev muted">${esc(preview)}</div>
       </div>
       <div class="muted" style="text-align:right">${when(g.last)}</div>
-    </button>`;
+    </div>`;
 }
 
 function render() {
@@ -313,6 +325,7 @@ function render() {
   const list = groups();
   const mobile = narrow.matches;
 
+  showSel();
   if (mobile && openKey) {
     const g = list.find(x => x.key === openKey);
     if (!g) { closeThread(); return; }
@@ -362,6 +375,9 @@ function render() {
     return `
     <div class="contact">
       <div class="chead" onclick="toggle('${esc(g.key)}')" style="cursor:pointer">
+        <input type="checkbox" class="pick" ${picked.has(g.key) ? 'checked' : ''}
+               onclick="event.stopPropagation()"
+               onchange="pick('${esc(g.key)}', this.checked)">
         <span class="chev">${isOpen ? '&#9662;' : '&#9656;'}</span>
         <div style="flex:1"><b>${esc(g.name || g.key)}</b>
           ${g.name ? `<span class="muted"> ${esc(g.key)}</span>` : ''}
@@ -414,6 +430,37 @@ async function sendNew() {
 }
 
 function section(which) { shut.has(which) ? shut.delete(which) : shut.add(which); render(); }
+function pick(key, on) {
+  on ? picked.add(key) : picked.delete(key);
+  showSel();
+}
+function showSel() {
+  $('selbar').hidden = picked.size === 0;
+  $('selcount').textContent = picked.size + ' selected';
+}
+function clearSel() { picked.clear(); showSel(); render(); }
+
+async function batch(action) {
+  const contacts = [...picked];
+  if (!contacts.length) return;
+  const what = contacts.length + (contacts.length === 1 ? ' thread' : ' threads');
+  if (action === 'delete' &&
+      !confirm(`Delete every call and text in ${what} permanently?`)) return;
+  if (action === 'block' &&
+      !confirm(`Block ${what}? Those callers will be hung up on.`)) return;
+  say('Working…');
+  try {
+    const r = await api('POST', 'thread', {contacts, action});
+    picked.clear();
+    showSel();
+    await refresh();
+    say(r.deleted != null ? `Deleted ${r.deleted} item(s) in ${r.threads} thread(s).`
+        : r.blocked != null ? `Blocked ${r.blocked}.`
+        : r.archived != null ? `Archived ${r.archived} item(s).`
+        : 'Done.');
+  } catch (e) { say('Failed — ' + e.message); }
+}
+
 function openThread(key) { openKey = key; render(); }
 function closeThread() { openKey = null; render(); }
 function toggle(key) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); }

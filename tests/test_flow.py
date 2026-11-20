@@ -881,3 +881,55 @@ class GoogleContacts(Base):
         self.db["STATE#gtoken"] = {"refresh_token": "RT"}
         out = h.lambda_handler({"contacts": True}, None)
         self.assertEqual(out["written"], 2)
+
+
+class BatchActions(Base):
+    def post(self, payload):
+        h.ADMIN_TOKEN = "secret"
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/thread",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps(payload)}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def populate(self):
+        for i, num in enumerate(["+12155551234", "+19995550000", "22000"], 1):
+            h.store_message(f"m{i}", num, "", "Cell", "hi", src="cell")
+        h.store_message("m4", "+15555555555", "", "Cell", "keep me", src="cell")
+
+    def test_archive_several_threads_at_once(self):
+        self.populate()
+        code, out = self.post({"contacts": ["+12155551234", "+19995550000", "22000"],
+                               "action": "archive"})
+        self.assertEqual((code, out["archived"], out["threads"]), (200, 3, 3))
+        self.assertTrue(self.db["MSG#m1"]["archived"])
+        self.assertNotIn("archived", self.db["MSG#m4"])
+
+    def test_delete_several_threads_at_once(self):
+        self.populate()
+        code, out = self.post({"contacts": ["+12155551234", "22000"], "action": "delete"})
+        self.assertEqual((code, out["deleted"]), (200, 2))
+        self.assertNotIn("MSG#m1", self.db)
+        self.assertIn("MSG#m2", self.db)
+
+    def test_block_several_and_keep_their_names(self):
+        self.db["NUM#+12155551234"] = {"pk": "NUM#+12155551234", "status": "allow",
+                                       "name": "Spam Co"}
+        code, out = self.post({"contacts": ["+12155551234", "609-555-0123"],
+                               "action": "block"})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.db["NUM#+12155551234"]["status"], "block")
+        self.assertEqual(self.db["NUM#+12155551234"]["name"], "Spam Co")
+        self.assertEqual(self.db["NUM#+16095550123"]["status"], "block")
+
+    def test_single_contact_form_still_works(self):
+        self.populate()
+        code, out = self.post({"contact": "+12155551234", "action": "delete"})
+        self.assertEqual((code, out["deleted"]), (200, 1))
+
+    def test_empty_selection_is_refused(self):
+        self.assertEqual(self.post({"contacts": [], "action": "delete"})[0], 400)
+
+    def test_unknown_action_is_refused(self):
+        self.assertEqual(self.post({"contacts": ["+12155551234"], "action": "nuke"})[0], 400)

@@ -10,6 +10,8 @@ Screens calls to two Telnyx numbers (one fed by the cell, one by Google Voice) b
 
 Texts land in the same panel, grouped by contact, with a reply box.
 
+Every thread has a checkbox. Tick any number and a bar appears offering Archive, Block and Delete across the whole selection, which is one scan of the table rather than one per thread. Blocking keeps whatever name is already on file.
+
 Threads can be archived (they move to an Archived tab and come back with Unarchive) or deleted outright. Deleting removes every call and text with that contact from the table; voicemail and call recordings stay in S3.
 
 The pencil button composes a new message to a number with no history. That always goes out from the cell, because Google Voice's email relay is a reply address that only exists once someone has texted you.

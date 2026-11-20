@@ -711,21 +711,38 @@ def admin_api(method, path, query, body, event=None):
     if path == "/admin/api/office-reply" and method == "GET":
         return 200, {"text": office_reply()}
     if path == "/admin/api/thread" and method == "POST":
-        raw = (body.get("contact") or "").strip()
-        # Short codes never normalise, and those threads need removing too.
-        contact = normalize(raw) or raw
+        raw = body.get("contacts")
+        if raw is None:
+            raw = [body.get("contact")]
+        # Short codes never normalise, and those threads need acting on too.
+        contacts = {normalize(c or "") or (c or "").strip() for c in raw}
+        contacts.discard("")
         action = body.get("action")
-        if not contact or action not in ("archive", "unarchive", "delete"):
-            return 400, {"error": "need a contact and archive, unarchive or delete"}
+        if not contacts or action not in ("archive", "unarchive", "delete",
+                                          "block", "allow"):
+            return 400, {"error": "need at least one contact and a known action"}
+
+        if action in ("block", "allow"):
+            for c in contacts:
+                if not c.startswith("+"):
+                    continue
+                existing = db_get(f"NUM#{c}") or {}
+                db_put({"pk": f"NUM#{c}", "sk": "META", "gsi1pk": "NUMS",
+                        "gsi1sk": c, "number": c, "status": action,
+                        "name": existing.get("name", "")})
+            return 200, {action + "ed": len(contacts)}
+
+        # One scan for the whole batch rather than one per contact.
         items = [i for i in db_list("CALLS", 500) + db_list("MSGS", 500)
-                 if (i.get("contact") or i.get("from")) == contact]
+                 if (i.get("contact") or i.get("from")) in contacts]
         if action == "delete":
             for i in items:
                 db_delete(i["pk"])
-            return 200, {"deleted": len(items)}
+            return 200, {"deleted": len(items), "threads": len(contacts)}
         for i in items:
             db_update(i["pk"], archived=(action == "archive"))
-        return 200, {"archived" if action == "archive" else "restored": len(items)}
+        key = "archived" if action == "archive" else "restored"
+        return 200, {key: len(items), "threads": len(contacts)}
 
     if path == "/admin/api/call" and method == "POST":
         to = normalize(body.get("to"))
