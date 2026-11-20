@@ -16,6 +16,8 @@ The pencil button composes a new message to a number with no history. That alway
 
 Contact names come from the Numbers screen. There is no Google Contacts API call — an app password only reaches mail — so instead you export from contacts.google.com as Google CSV and import the file there. Importing can either just label callers (`name`, still screened) or also allow them through.
 
+Text size is adjustable: A− and A+ in the ⋮ menu, 13px to 26px, remembered per device in localStorage. Everything scales with it, since no font size is pinned in pixels — except the form fields, which stay at 16px or above so phone browsers do not zoom in when you tap them.
+
 The panel follows the screen it is on. On a phone it is a conversation list you tap into, with a thread view and a reply box pinned to the bottom; on a wide screen every contact is expanded with calls on the left and texts on the right. Rotating the phone or resizing the window switches between the two live. It is installable: open `/admin` in Chrome on Android, then "Add to Home screen", and it runs full-screen with its own icon. The inbox re-reads itself every 30 seconds while in the foreground, and pauses that while you are typing a reply.
 
 - **Cell texts** arrive from a gateway app on the Android phone, which posts each one to `/gateway`. Replies go back out through the same app, so they send from your real cell number. Two apps are supported and the inbound handler accepts either payload shape: SimpApp's *SMS Gateway API* (on the Play Store, set `SMS_API_KEY`) and capcom6's *SMS Gateway* (sideloaded, set `SMS_GATEWAY_USER`/`SMS_GATEWAY_PASS`). The Play Store one relays through the vendor's Firebase; the sideloaded one talks straight to this Lambda.

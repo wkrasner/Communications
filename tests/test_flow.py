@@ -770,3 +770,30 @@ class ClickToCall(Base):
 
     def test_bad_number_is_refused(self):
         self.assertEqual(self.call("nonsense")[0], 400)
+
+
+class TextSize(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""}, None)["body"]
+
+    def test_base_font_comes_from_a_variable(self):
+        body = self.page()
+        self.assertIn("--fs: 16px", body)
+        self.assertIn("font: var(--fs)/1.45", body)
+
+    def test_size_is_clamped_and_remembered(self):
+        body = self.page()
+        self.assertIn("FS_MIN = 13, FS_MAX = 26", body)
+        self.assertIn("localStorage.setItem('fontSize', fs)", body)
+
+    def test_no_text_is_left_pinned_to_pixels(self):
+        """Pinned px font sizes would not scale with the control."""
+        import re
+        css = self.page().split("</style>")[0]
+        pinned = [m for m in re.findall(r"font-size:\s*([^;]+);", css)
+                  if "px" in m and "--fs" not in m and "max(" not in m]
+        self.assertEqual(pinned, [], f"still pinned: {pinned}")
+
+    def test_inputs_stay_at_least_16px_so_phones_do_not_zoom(self):
+        self.assertIn("font-size: max(16px, 1em)", self.page())

@@ -12,6 +12,7 @@
     color-scheme: light dark;
     --line: #8884; --soft: #8881; --accent: #2563eb;
     --pad: env(safe-area-inset-bottom, 0px);
+    --fs: 16px;   /* set by the A-/A+ control, remembered per device */
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   /* An explicit display in a rule below would otherwise beat the UA's
@@ -19,7 +20,7 @@
   [hidden] { display: none !important; }
   html, body { height: 100%; }
   body {
-    font: 16px/1.45 system-ui, -apple-system, sans-serif;
+    font: var(--fs)/1.45 system-ui, -apple-system, sans-serif;
     margin: 0; display: flex; flex-direction: column; overflow: hidden;
   }
   button {
@@ -28,14 +29,14 @@
     min-height: 40px;
   }
   button.on, button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.small { padding: 5px 10px; font-size: 13px; min-height: 32px; }
-  button.icon { border: 0; padding: 6px 10px; font-size: 20px; min-width: 40px; }
+  button.small { padding: 5px 10px; font-size: .82em; min-height: 32px; }
+  button.icon { border: 0; padding: 6px 10px; font-size: 1.25em; min-width: 40px; }
   input, textarea {
-    font: inherit; font-size: 16px; padding: 10px; border: 1px solid var(--line);
+    font: inherit; font-size: max(16px, 1em); padding: 10px; border: 1px solid var(--line);
     border-radius: 9px; background: none; color: inherit; width: 100%;
   }
-  .muted { opacity: .62; font-size: 13px; }
-  .tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+  .muted { opacity: .62; font-size: .82em; }
+  .tag { font-size: .7em; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
   .flag { border-color: #d97706; color: #d97706; }
   .answered { color: #16a34a; }
   .blocked, .screen_failed, .ring_failed { color: #dc2626; }
@@ -45,10 +46,10 @@
     display: flex; gap: 8px; align-items: center; padding: 10px 12px;
     border-bottom: 1px solid var(--line); flex-shrink: 0;
   }
-  header h1 { font-size: 17px; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header h1 { font-size: 1.06em; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: var(--pad); }
-  #msg { font-size: 13px; opacity: .65; }
+  #msg { font-size: .82em; opacity: .65; }
   #msg:not(:empty) { padding: 6px 12px; }
 
   .row {
@@ -61,11 +62,11 @@
   .row .prev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* A heavy rule so one number's traffic never reads as the next one's. */
   .sep { height: 4px; background: var(--accent); opacity: .85; }
-  .chev { font-size: 13px; opacity: .6; width: 14px; flex-shrink: 0; }
+  .chev { font-size: .82em; opacity: .6; width: 14px; flex-shrink: 0; }
 
   .thread { padding: 12px; }
   .pane h3 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    font-size: .7em; text-transform: uppercase; letter-spacing: .06em;
     opacity: .55; margin: 0 0 8px; font-weight: 700;
   }
   .item { padding: 7px 0; border-bottom: 1px solid var(--soft); }
@@ -78,7 +79,7 @@
   .out .bubble { background: var(--accent); color: #fff; text-align: left; }
   .script {
     margin-top: 5px; padding: 6px 9px; border-left: 2px solid var(--line);
-    font-size: 14px; white-space: pre-wrap; opacity: .9;
+    font-size: .88em; white-space: pre-wrap; opacity: .9;
   }
   .composer {
     display: flex; gap: 8px; padding: 10px 12px calc(10px + var(--pad));
@@ -121,7 +122,12 @@
   <button id="tabNums" onclick="show('nums')">Numbers</button>
   <button id="tabArch" onclick="show('archived')">Archived</button>
   <button onclick="showStatus()">Status</button>
-  <button onclick="signOut()" style="margin-left:auto">Sign out</button>
+  <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
+    <button class="small" onclick="textSize(-1)" title="Smaller text">A&minus;</button>
+    <span id="fsnow" class="muted" style="min-width:34px;text-align:center"></span>
+    <button class="small" onclick="textSize(1)" title="Larger text" style="font-size:1.1em">A+</button>
+  </span>
+  <button onclick="signOut()">Sign out</button>
 </div>
 
 <div class="bar" id="searchbar" hidden>
@@ -159,6 +165,21 @@ try { token = localStorage.getItem('adminToken') || ''; } catch (e) {}
 let calls = [], msgs = [], officeText = '';
 let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
 const narrow = window.matchMedia('(max-width: 720px)');
+
+const FS_MIN = 13, FS_MAX = 26;
+let fs = 16;
+try { fs = Math.min(FS_MAX, Math.max(FS_MIN, +localStorage.getItem('fontSize') || 16)); } catch (e) {}
+function applyTextSize() {
+  document.documentElement.style.setProperty('--fs', fs + 'px');
+  const el = document.getElementById('fsnow');
+  if (el) el.textContent = fs + 'px';
+}
+function textSize(step) {
+  fs = Math.min(FS_MAX, Math.max(FS_MIN, fs + step));
+  try { localStorage.setItem('fontSize', fs); } catch (e) {}
+  applyTextSize();
+}
+applyTextSize();
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
@@ -644,6 +665,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function start() {
+  applyTextSize();
   if (!token) { $('login').hidden = false; return; }
   $('login').hidden = true;
   $('hdr').hidden = false;
