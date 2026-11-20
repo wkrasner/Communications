@@ -975,3 +975,20 @@ class MessageOrder(Base):
         self.assertIn("--them: #0f766e", css)
         self.assertIn("background: var(--them)", css)
         self.assertIn(".out .bubble { background: var(--accent)", css)
+
+
+class ComposerPosition(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_mobile_composer_sits_above_the_thread(self):
+        body = self.page()
+        self.assertLess(body.index('id="composer"'), body.index('<main id="main"'))
+        self.assertIn("border-bottom: 1px solid var(--line); flex-shrink: 0;",
+                      body.split(".composer {")[1][:200])
+
+    def test_desktop_reply_box_comes_before_the_messages(self):
+        pane = self.page().split('<div class="pane"><h3>Texts</h3>')[1]
+        self.assertLess(pane.index('class="reply"'), pane.index("textsHtml(g)"))
