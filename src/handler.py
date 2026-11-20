@@ -1107,11 +1107,7 @@ def lambda_handler(event, context):
             "start_url": "/admin", "scope": "/admin", "display": "standalone",
             "background_color": "#ffffff", "theme_color": "#2563eb",
             "icons": [{
-                "src": ("data:image/svg+xml,"
-                        "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E"
-                        "%3Crect width='192' height='192' rx='40' fill='%232563eb'/%3E"
-                        "%3Ctext x='96' y='130' font-size='104' text-anchor='middle'"
-                        " fill='white' font-family='sans-serif'%3EC%3C/text%3E%3C/svg%3E"),
+                "src": ("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2713%27%20fill%3D%27%232563eb%27%2F%3E%3Cpath%20d%3D%27M9%209h46a5%205%200%200%201%205%205v24a5%205%200%200%201-5%205H26L13%2055V43H9a5%205%200%200%201-5-5V14a5%205%200%200%201%205-5z%27%20fill%3D%27%23ffffff%27%2F%3E%3Cg%20transform%3D%27translate%2833.6%2033.5%29%20scale%281.5%29%20translate%28-33.6%20-37%29%27%3E%3Cpath%20d%3D%27M41.6%2036.3c-1.4%200-2.8-.23-4.07-.65a1.14%201.14%200%200%200-1.17.28l-1.81%202.27c-3.26-1.56-6.32-4.5-7.95-7.88l2.25-1.91c.31-.32.4-.77.28-1.18a13.1%2013.1%200%200%201-.65-4.07c0-.62-.52-1.14-1.14-1.14h-3.99c-.62%200-1.36.28-1.36%201.14%200%2010.71%208.92%2019.62%2019.62%2019.62.82%200%201.14-.72%201.14-1.36v-3.98c0-.62-.52-1.14-1.14-1.14z%27%20fill%3D%27%232563eb%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"),
                 "sizes": "192x192", "type": "image/svg+xml", "purpose": "any",
             }],
         }, "application/manifest+json")

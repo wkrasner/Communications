@@ -1232,3 +1232,27 @@ class NameResolution(Base):
         rows = json.loads(r["body"])
         self.assertEqual(rows[0]["number"], "+16095550123")
         self.assertEqual(rows[0]["name"], "Dr Smith")
+
+
+class TabIcon(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_the_tab_has_an_icon(self):
+        self.assertIn('<link rel="icon" href="data:image/svg+xml,', self.page())
+
+    def test_the_icon_is_valid_svg(self):
+        import re, urllib.parse, xml.dom.minidom
+        href = re.search(r'<link rel="icon" href="([^"]+)"', self.page()).group(1)
+        xml.dom.minidom.parseString(urllib.parse.unquote(href.split(",", 1)[1]))
+
+    def test_the_installed_app_uses_the_same_mark(self):
+        import re
+        page_icon = re.search(r'<link rel="icon" href="([^"]+)"', self.page()).group(1)
+        man = json.loads(h.lambda_handler(
+            {"requestContext": {"http": {"method": "GET"}},
+             "rawPath": "/manifest.webmanifest", "headers": {}, "body": ""},
+            None)["body"])
+        self.assertEqual(man["icons"][0]["src"], page_icon)
