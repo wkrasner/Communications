@@ -367,7 +367,8 @@ function render() {
           <button class="small" onclick="makeTask('${esc(g.key)}')">&#128203; Make task</button>
           <a class="small" style="text-decoration:none;display:inline-flex;align-items:center;
              border:1px solid var(--line);border-radius:9px;padding:5px 10px;color:inherit"
-             href="${contactsLink(g)}" target="_blank" rel="noopener">&#128100; Contacts</a>
+             href="${contactsLink(g)}" target="_blank" rel="noopener"
+             onclick="syncSoon()">&#128100; Contacts</a>
         </div>
         <div class="pane">
           <h3 onclick="section('texts')" style="cursor:pointer">
@@ -693,6 +694,15 @@ async function connectContacts() {
     window.open(r.url, '_blank', 'noopener');
   } catch (e) { say('Failed — ' + e.message); }
 }
+/** Opening Google Contacts usually means editing one. Ask the server to
+ *  re-sync in a few minutes, so the new name turns up on its own. */
+async function syncSoon() {
+  try {
+    const r = await api('POST', 'contacts-sync', {later: true});
+    say(`Contacts will re-sync in about ${Math.round((r.due_in_secs || 300) / 60)} minutes.`);
+  } catch (e) { /* the link still opens; this is a convenience only */ }
+}
+
 async function syncContacts() {
   say('Syncing contacts…');
   try {
@@ -734,7 +744,7 @@ async function loadNums() {
       <textarea id="bulk" rows="4" placeholder="One per line: number, name&#10;609-555-0123, Dr. Smith"></textarea>
       <div class="muted">
         <a href="https://contacts.google.com/" target="_blank" rel="noopener"
-           style="color:var(--accent)">&#128100; Open Google Contacts</a>
+           onclick="syncSoon()" style="color:var(--accent)">&#128100; Open Google Contacts</a>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="primary" onclick="bulkAdd('allow')">&#10003; Add as allowed</button>

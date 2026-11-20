@@ -1256,3 +1256,66 @@ class TabIcon(Base):
              "rawPath": "/manifest.webmanifest", "headers": {}, "body": ""},
             None)["body"])
         self.assertEqual(man["icons"][0]["src"], page_icon)
+
+
+class ScheduledContactSync(Base):
+    def setUp(self):
+        super().setUp()
+        h.ADMIN_TOKEN = "secret"
+        h.GOOGLE_CLIENT_ID, h.GOOGLE_CLIENT_SECRET = "cid", "csec"
+        self.db["STATE#gtoken"] = {"pk": "STATE#gtoken", "refresh_token": "RT"}
+        import sys, types
+        fake = types.ModuleType("gcontacts")
+        fake.access_token = lambda *a: "AT"
+        fake.connections = lambda token, page_limit=20: [("+12155551234", "Mom")]
+        fake.other_contacts = lambda token, page_limit=20: []
+        sys.modules["gcontacts"] = fake
+        self.real_poll = h.poll_gmail
+        h.poll_gmail = lambda: {"polled": 0}
+
+    def tearDown(self):
+        import sys
+        sys.modules.pop("gcontacts", None)
+        h.poll_gmail = self.real_poll
+        h.GOOGLE_CLIENT_ID = h.GOOGLE_CLIENT_SECRET = ""
+
+    def ask_later(self):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/contacts-sync",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps({"later": True})}, None)
+        return json.loads(r["body"])
+
+    def test_asking_later_schedules_rather_than_syncing_now(self):
+        out = self.ask_later()
+        self.assertEqual(out["due_in_secs"], 300)
+        self.assertIn("STATE#gsyncdue", self.db)
+        self.assertNotIn("NUM#+12155551234", self.db)     # nothing synced yet
+
+    def test_the_tick_does_nothing_before_it_is_due(self):
+        self.ask_later()
+        h.lambda_handler({"poll": True}, None)
+        self.assertNotIn("NUM#+12155551234", self.db)
+        self.assertIn("STATE#gsyncdue", self.db)
+
+    def test_the_tick_syncs_once_it_is_due_then_forgets(self):
+        self.ask_later()
+        self.db["STATE#gsyncdue"]["due"] = int(h.time.time()) - 1
+        out = h.lambda_handler({"poll": True}, None)
+        self.assertEqual(self.db["NUM#+12155551234"]["name"], "Mom")
+        self.assertIn("contacts", out)
+        self.assertNotIn("STATE#gsyncdue", self.db)
+
+    def test_a_failing_sync_does_not_retry_forever(self):
+        import sys
+        sys.modules["gcontacts"].access_token = lambda *a: (_ for _ in ()).throw(
+            RuntimeError("boom"))
+        self.ask_later()
+        self.db["STATE#gsyncdue"]["due"] = int(h.time.time()) - 1
+        h.lambda_handler({"poll": True}, None)
+        self.assertNotIn("STATE#gsyncdue", self.db)
+
+    def test_a_plain_tick_with_nothing_scheduled_is_unchanged(self):
+        out = h.lambda_handler({"poll": True}, None)
+        self.assertEqual(out, {"polled": 0})

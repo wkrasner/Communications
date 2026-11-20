@@ -717,6 +717,31 @@ def make_task(contact, text, name=""):
     return True, "Task created."
 
 
+SYNC_AFTER_SECS = 300
+
+
+def schedule_contact_sync(seconds=SYNC_AFTER_SECS):
+    """Ask for a contact sync a few minutes from now.
+
+    Server-side rather than a timer in the page: the point is that it still
+    happens after you have wandered off to Google Contacts and closed the tab.
+    """
+    due = time.time() + seconds
+    db_put({"pk": "STATE#gsyncdue", "sk": "META", "due": int(due)})
+    return {"due_in_secs": int(seconds)}
+
+
+def run_due_contact_sync():
+    """Called on the minute tick; runs a scheduled sync once it comes due."""
+    row = db_get("STATE#gsyncdue")
+    if not row:
+        return None
+    if time.time() < float(row.get("due", 0)):
+        return None
+    db_delete("STATE#gsyncdue")      # clear first: a failure must not loop
+    return sync_contacts()
+
+
 def poll_gmail():
     """Pull new Google Voice notification emails into the message store.
 
@@ -937,6 +962,8 @@ def admin_api(method, path, query, body, event=None):
                      "redirect_uri": uri}
 
     if path == "/admin/api/contacts-sync" and method == "POST":
+        if body.get("later"):
+            return 200, schedule_contact_sync()
         return 200, sync_contacts()
 
     if path == "/admin/api/status" and method == "GET":
@@ -955,6 +982,7 @@ def admin_api(method, path, query, body, event=None):
             "google_contacts": clean(db_get("STATE#gsync") or {}) or
                                {"note": "no contact sync has run yet"},
             "contacts_connected": bool((db_get("STATE#gtoken") or {}).get("refresh_token")),
+            "sync_due": int((db_get("STATE#gsyncdue") or {}).get("due", 0)),
             "has_google_client": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
             "medtask_ready": bool(MEDTASK_URL and MEDTASK_SECRET),
         }
@@ -1026,7 +1054,11 @@ def on_gateway_post(body):
 def lambda_handler(event, context):
     # Background invocations rather than HTTP requests.
     if event.get("poll"):
-        return poll_gmail()
+        out = poll_gmail()
+        due = run_due_contact_sync()
+        if due is not None:
+            out = {"gmail": out, "contacts": due}
+        return out
     if event.get("contacts"):
         return sync_contacts()
     if event.get("transcribe"):

@@ -16,7 +16,7 @@ Threads can be archived (they move to an Archived tab and come back with Unarchi
 
 The pencil button composes a new message to a number with no history. That always goes out from the cell, because Google Voice's email relay is a reply address that only exists once someone has texted you.
 
-Contact names come from Google Contacts, synced over the People API every 12 hours and on demand from the Status screen. This needs real OAuth, since an app password reaches mail and nothing else: set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then press Connect on the Status screen and approve once.
+Contact names come from Google Contacts, synced over the People API every 12 hours, on demand from the Status screen, and five minutes after you open a Contacts link from the panel — opening one usually means editing a contact, and a name added there should turn up on its own. That delayed sync is scheduled server-side and run by the minute tick, so it still happens after you have closed the tab. This needs real OAuth, since an app password reaches mail and nothing else: set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, then press Connect on the Status screen and approve once.
 
 Publish the OAuth consent screen to **Production**. While it sits in Testing, Google expires the refresh token after seven days and the sync dies quietly every week. You will click past an "unverified app" warning, which is expected — verification only matters for putting an app in front of other people.
 
