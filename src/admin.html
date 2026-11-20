@@ -627,8 +627,18 @@ async function makeTask(key) {
     const r = await api('POST', 'task', {
       contact: key, name: (g && g.name) || '',
       text: latest ? latest.text : ''});
-    say(r.ok ? r.note : 'Not created — ' + r.note);
-  } catch (e) { say('Not created — ' + e.message); }
+    if (r.ok) {
+      say(r.note + ' Open tasks.google.com to see it.');
+    } else {
+      // A silent failure here is worse than an interruption: the whole point
+      // is that something lands on the board.
+      say('Not created — ' + (r.note || r.error || 'unknown reason'));
+      alert('Task not created.\n\n' + (r.note || r.error || 'unknown reason'));
+    }
+  } catch (e) {
+    say('Not created — ' + e.message);
+    alert('Task not created.\n\n' + e.message);
+  }
 }
 
 async function callOut(to) {

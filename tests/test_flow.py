@@ -1048,6 +1048,13 @@ class Tasks(Base):
         self.assertEqual(code, 502)
         self.assertIn("not connected", out["note"])
 
+    def test_a_failure_is_raised_to_the_user_not_swallowed(self):
+        page = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+        fn = page.split("async function makeTask")[1].split("async function")[0]
+        self.assertIn("alert(", fn)
+
     def test_short_code_thread_can_make_a_task(self):
         code, out = self.post("/admin/api/task", {"contact": "22000", "text": "code"})
         self.assertEqual(code, 200)
