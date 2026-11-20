@@ -30,6 +30,8 @@
   }
   button.on, button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.small { padding: 5px 10px; font-size: .82em; min-height: 32px; }
+  /* Keep glyphs from rendering as coloured emoji against a blue button. */
+  button { font-variant-emoji: text; }
   button.icon { border: 0; padding: 6px 10px; font-size: 1.25em; min-width: 40px; }
   input, textarea {
     font: inherit; font-size: max(16px, 1em); padding: 10px; border: 1px solid var(--line);
@@ -107,7 +109,7 @@
   <h1 style="font-size:19px;margin:0">Communications</h1>
   <input id="token" type="password" placeholder="Admin token" autocomplete="current-password"
          onkeydown="if(event.key==='Enter')saveToken()">
-  <button class="primary" onclick="saveToken()">Sign in</button>
+  <button class="primary" onclick="saveToken()">&#128274; Sign in</button>
 </div>
 
 <header id="hdr" hidden>
@@ -119,16 +121,16 @@
 </header>
 
 <div class="bar" id="menu" hidden>
-  <button id="tabInbox" onclick="show('inbox')">Inbox</button>
-  <button id="tabNums" onclick="show('nums')">Numbers</button>
-  <button id="tabArch" onclick="show('archived')">Archived</button>
-  <button onclick="showStatus()">Status</button>
+  <button id="tabInbox" onclick="show('inbox')">&#9993; Inbox</button>
+  <button id="tabNums" onclick="show('nums')">&#128100; Numbers</button>
+  <button id="tabArch" onclick="show('archived')">&#128230; Archived</button>
+  <button onclick="showStatus()">&#9881; Status</button>
   <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
     <button class="small" onclick="textSize(-1)" title="Smaller text">A&minus;</button>
     <span id="fsnow" class="muted" style="min-width:34px;text-align:center"></span>
     <button class="small" onclick="textSize(1)" title="Larger text" style="font-size:1.1em">A+</button>
   </span>
-  <button onclick="signOut()">Sign out</button>
+  <button onclick="signOut()">&#9094; Sign out</button>
 </div>
 
 <div class="bar" id="searchbar" hidden>
@@ -138,9 +140,9 @@
 <div class="bar" id="selbar" hidden>
   <span id="selcount" class="muted" style="flex:1;align-self:center"></span>
   <button class="small" onclick="batch('archive')">Archive</button>
-  <button class="small" onclick="batch('block')">Block</button>
-  <button class="small" onclick="batch('delete')">Delete</button>
-  <button class="small" onclick="clearSel()">Cancel</button>
+  <button class="small" onclick="batch('block')">&#8856; Block</button>
+  <button class="small" onclick="batch('delete')">&#128465; Delete</button>
+  <button class="small" onclick="clearSel()">&#10005; Cancel</button>
 </div>
 
 <div id="msg"></div>
@@ -159,15 +161,15 @@
     <div class="muted">Goes out from your cell. Google Voice can only reply inside a
       thread someone else started, so a new conversation can't be sent as 820-5401.</div>
     <div style="display:flex;gap:8px">
-      <button class="primary" style="flex:1" onclick="sendNew()">Send</button>
-      <button style="flex:1" onclick="callNew()">Call</button>
+      <button class="primary" style="flex:1" onclick="sendNew()">&#10148; Send</button>
+      <button style="flex:1" onclick="callNew()">&#9742; Call</button>
     </div>
   </div>
 </div>
 
 <div class="composer" id="composer" hidden>
   <input id="reply" placeholder="Reply…" onkeydown="if(event.key==='Enter')sendText()">
-  <button class="primary" onclick="sendText()">Send</button>
+  <button class="primary" onclick="sendText()">&#10148; Send</button>
 </div>
 
 <script>
@@ -287,8 +289,8 @@ function callsHtml(g) {
     <div class="item">
       <div><span class="tag">${esc(c.line)}</span>
         <span class="${esc(c.result)}">${esc(String(c.result).replace(/_/g, ' '))}</span>
-        ${c.voicemail ? `<button class="small" onclick="play('${esc(c.voicemail)}', this)">Voicemail</button>` : ''}
-        ${c.recording ? `<button class="small" onclick="play('${esc(c.recording)}', this)">Recording</button>` : ''}
+        ${c.voicemail ? `<button class="small" onclick="play('${esc(c.voicemail)}', this)">&#9654; Voicemail</button>` : ''}
+        ${c.recording ? `<button class="small" onclick="play('${esc(c.recording)}', this)">&#9654; Recording</button>` : ''}
       </div>
       <div class="muted">${when(c.ts)}</div>
       ${c.vm_transcript ? `<div class="script">${esc(c.vm_transcript)}</div>` : ''}
@@ -340,12 +342,12 @@ function render() {
       <div class="thread">
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           ${g.key.startsWith('+') ? `
-            <button class="small" onclick="callOut('${esc(g.key)}')">Call</button>
-            <button class="small" onclick="mark('${esc(g.key)}','allow')">Allow</button>
-            <button class="small" onclick="mark('${esc(g.key)}','block')">Block</button>` : ''}
-          <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
-          <button class="small" onclick="thread('${esc(g.key)}','delete')">Delete</button>
-          ${g.key.startsWith('+') && g.flagged && officeText ? `<button class="small" onclick="useOffice()">Office referral</button>` : ''}
+            <button class="small" onclick="callOut('${esc(g.key)}')">&#9742; Call</button>
+            <button class="small" onclick="mark('${esc(g.key)}','allow')">&#10003; Allow</button>
+            <button class="small" onclick="mark('${esc(g.key)}','block')">&#8856; Block</button>` : ''}
+          <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? '&#128229; Unarchive' : '&#128230; Archive'}</button>
+          <button class="small" onclick="thread('${esc(g.key)}','delete')">&#128465; Delete</button>
+          ${g.key.startsWith('+') && g.flagged && officeText ? `<button class="small" onclick="useOffice()">&#127973; Office referral</button>` : ''}
         </div>
         <div class="pane">
           <h3 onclick="section('texts')" style="cursor:pointer">
@@ -388,11 +390,11 @@ function render() {
         <span class="muted">${g.calls.length} call${g.calls.length === 1 ? '' : 's'} ·
           ${g.msgs.length} text${g.msgs.length === 1 ? '' : 's'} · ${when(g.last)}</span>
         ${g.key.startsWith('+') ? `
-          <button class="small" onclick="event.stopPropagation();callOut('${esc(g.key)}')">Call</button>
-          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','allow')">Allow</button>
-          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">Block</button>` : ''}
-        <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? 'Unarchive' : 'Archive'}</button>
-        <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','delete')">Delete</button>
+          <button class="small" onclick="event.stopPropagation();callOut('${esc(g.key)}')">&#9742; Call</button>
+          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','allow')">&#10003; Allow</button>
+          <button class="small" onclick="event.stopPropagation();mark('${esc(g.key)}','block')">&#8856; Block</button>` : ''}
+        <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? '&#128229; Unarchive' : '&#128230; Archive'}</button>
+        <button class="small" onclick="event.stopPropagation();thread('${esc(g.key)}','delete')">&#128465; Delete</button>
       </div>
       ${isOpen ? `
       <div class="panes">
@@ -402,10 +404,10 @@ function render() {
             <div class="reply">
               <input id="r-${esc(g.key)}" placeholder="Reply…"
                      onkeydown="if(event.key==='Enter')sendText('${esc(g.key)}')">
-              <button class="primary small" onclick="sendText('${esc(g.key)}')">Send</button>
+              <button class="primary small" onclick="sendText('${esc(g.key)}')">&#10148; Send</button>
             </div>
             ${g.flagged && officeText ? `<button class="small" style="margin-top:7px"
-                onclick="useOffice('${esc(g.key)}')">Use office referral</button>` : ''}` : ''}
+                onclick="useOffice('${esc(g.key)}')">&#127973; Use office referral</button>` : ''}` : ''}
         </div>
       </div>` : ''}
     </div>`;
@@ -549,7 +551,7 @@ async function showStatus() {
          : 'off — only voicemail is recorded'}</div>
        <button class="small" style="margin-top:7px"
          onclick="setRecording(${s.record_calls ? 'false' : 'true'})">
-         Turn ${s.record_calls ? 'off' : 'on'}</button>
+         &#9210; Turn ${s.record_calls ? 'off' : 'on'}</button>
        ${s.record_calls ? '' : `<div class="muted" style="margin-top:6px">
          New Jersey is one-party consent; some states a caller may be in are not.</div>`}
      </div>`,
@@ -563,14 +565,14 @@ async function showStatus() {
          : `Connected — ${g2.written} name(s) written from ${g2.contacts} number(s)
              (${g2.saved ?? '?'} saved, ${g2.other ?? '?'} auto-collected) at ${when(g2.ts)}`}</div>
        ${s.has_google_client ? `<div style="display:flex;gap:7px;margin-top:7px;flex-wrap:wrap">
-         <button class="small" onclick="connectContacts()">${s.contacts_connected ? 'Reconnect' : 'Connect'}</button>
-         ${s.contacts_connected ? '<button class="small" onclick="syncContacts()">Sync now</button>' : ''}
+         <button class="small" onclick="connectContacts()">&#128279; ${s.contacts_connected ? 'Reconnect' : 'Connect'}</button>
+         ${s.contacts_connected ? '<button class="small" onclick="syncContacts()">&#8635; Sync now</button>' : ''}
        </div>` : ''}
      </div>`,
     `<div class="item"><b>Google Voice texts</b>
        <div class="muted">Re-read the mailbox and rewrite every Google Voice
          message from scratch. Use after a parsing fix; nothing is duplicated.</div>
-       <button class="small" style="margin-top:7px" onclick="reparse()">Re-import</button>
+       <button class="small" style="margin-top:7px" onclick="reparse()">&#8635; Re-import</button>
      </div>`,
   ].join('') + '</div>';
 }
@@ -632,9 +634,9 @@ async function loadNums() {
     <div style="padding:12px;display:grid;gap:9px">
       <textarea id="bulk" rows="4" placeholder="One per line: number, name&#10;609-555-0123, Dr. Smith"></textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="primary" onclick="bulkAdd('allow')">Add as allowed</button>
-        <button onclick="bulkAdd('name')">Add names only</button>
-        <button onclick="bulkAdd('block')">Add as blocked</button>
+        <button class="primary" onclick="bulkAdd('allow')">&#10003; Add as allowed</button>
+        <button onclick="bulkAdd('name')">&#127991; Add names only</button>
+        <button onclick="bulkAdd('block')">&#8856; Add as blocked</button>
       </div>
       <div style="border-top:1px solid var(--line);padding-top:10px;display:grid;gap:8px">
         <b style="font-size:14px">Import Google Contacts</b>
@@ -650,7 +652,7 @@ async function loadNums() {
     <div class="row">
       <div class="grow"><div class="ttl">${esc(n.name || n.number)}</div>
         <div class="muted">${esc(n.number)} · ${esc(n.status)}</div></div>
-      <button class="small" onclick="removeNum('${esc(n.number)}')">Remove</button>
+      <button class="small" onclick="removeNum('${esc(n.number)}')">&#128465; Remove</button>
     </div>`).join('');
 }
 async function bulkAdd(status) {

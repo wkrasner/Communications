@@ -942,3 +942,15 @@ class BatchActions(Base):
 
     def test_unknown_action_is_refused(self):
         self.assertEqual(self.post({"contacts": ["+12155551234"], "action": "nuke"})[0], 400)
+
+
+class ButtonIcons(Base):
+    def test_every_action_button_carries_a_glyph_and_its_words(self):
+        page = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+        for glyph, word in [("&#9742;", "Call"), ("&#10003;", "Allow"),
+                            ("&#8856;", "Block"), ("&#128465;", "Delete"),
+                            ("&#9654;", "Voicemail"), ("&#10148;", "Send"),
+                            ("&#9993;", "Inbox"), ("&#9881;", "Status")]:
+            self.assertIn(f"{glyph} {word}", page, word)
