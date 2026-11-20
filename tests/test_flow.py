@@ -1320,3 +1320,25 @@ class ScheduledContactSync(Base):
     def test_a_plain_tick_with_nothing_scheduled_is_unchanged(self):
         out = h.lambda_handler({"poll": True}, None)
         self.assertEqual(out, {"polled": 0})
+
+
+class EmojiPad(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_both_reply_boxes_have_an_emoji_button(self):
+        page = self.page()
+        self.assertIn("emojiPad('reply'", page)
+        self.assertIn("emojiPad('r-${esc(g.key)}'", page)
+
+    def test_the_pad_inserts_at_the_cursor_not_the_end(self):
+        fn = self.page().split("function insertEmoji")[1].split("async function")[0]
+        self.assertIn("box.selectionStart", fn)
+        self.assertIn("box.value.slice(0, a) + ch + box.value.slice(b)", fn)
+
+    def test_the_set_is_curated_and_covers_the_obvious_ones(self):
+        page = self.page()
+        for e in ["👍", "❤️", "📞", "💊", "✅", "🎉"]:
+            self.assertIn(e, page, e)

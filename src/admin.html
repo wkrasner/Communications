@@ -67,6 +67,16 @@
   /* A heavy rule so one number's traffic never reads as the next one's. */
   .sep { height: 4px; background: var(--accent); opacity: .85; }
   .pick { width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--accent); }
+  .emoji {
+    position: absolute; z-index: 20; background: Canvas; border: 1px solid var(--line);
+    border-radius: 12px; padding: 8px; max-width: 320px; box-shadow: 0 8px 24px #0003;
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px;
+  }
+  .emoji button {
+    border: 0; padding: 4px; min-height: 34px; font-size: 1.25em; line-height: 1;
+    font-variant-emoji: emoji; border-radius: 7px;
+  }
+  .emoji button:hover { background: var(--soft); }
   .chev { font-size: .82em; opacity: .6; width: 14px; flex-shrink: 0; }
 
   .thread { padding: 12px; }
@@ -153,6 +163,7 @@
 <div id="msg"></div>
 
 <div class="composer" id="composer" hidden>
+  <button class="icon" onclick="emojiPad('reply', this)" title="Emoji">&#128512;</button>
   <input id="reply" placeholder="Reply…" onkeydown="if(event.key==='Enter')sendText()">
   <button class="primary" onclick="sendText()">&#10148; Send</button>
 </div>
@@ -423,6 +434,8 @@ function render() {
         <div class="pane"><h3>Texts</h3>
           ${g.key.startsWith('+') ? `
             <div class="reply" style="margin:0 0 10px">
+              <button class="small" onclick="emojiPad('r-${esc(g.key)}', this)"
+                      title="Emoji" style="font-size:1em">&#128512;</button>
               <input id="r-${esc(g.key)}" placeholder="Reply…"
                      onkeydown="if(event.key==='Enter')sendText('${esc(g.key)}')">
               <button class="primary small" onclick="sendText('${esc(g.key)}')">&#10148; Send</button>
@@ -504,6 +517,47 @@ function openThread(key) { openKey = key; render(); }
 function closeThread() { openKey = null; render(); }
 function toggle(key) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); }
 function useOffice(key) { (key ? $('r-' + key) : $('reply')).value = officeText; }
+
+const EMOJI = ('😀 😅 😂 🙂 😉 😍 🥰 😘 🤔 😐 😕 🙁 😢 😭 😤 😳 ' +
+  '👍 👎 👌 🙏 👏 💪 🤝 ✌️ 👋 🫶 ❤️ 💔 🔥 ✨ 🎉 🥳 ' +
+  '✅ ❌ ❗ ❓ ⚠️ ⏰ 📅 📍 📞 📱 ✉️ 💬 🏥 💊 🚑 🩺 ' +
+  '☕ 🍺 🍕 🎂 🚗 ✈️ 🏠 🐶 🐱 ☀️ 🌧️ ❄️ 💤 🙌 🤷 😎').split(' ');
+
+/** A small pad of the emoji actually used, rather than a whole library. */
+function emojiPad(targetId, btn) {
+  const open = document.querySelector('.emoji');
+  if (open) { open.remove(); if (open.dataset.for === targetId) return; }
+  const pad = document.createElement('div');
+  pad.className = 'emoji';
+  pad.dataset.for = targetId;
+  pad.innerHTML = EMOJI.map(e =>
+    `<button type="button" onclick="insertEmoji('${targetId}', this.textContent)">${e}</button>`
+  ).join('');
+  document.body.appendChild(pad);
+  const r = btn.getBoundingClientRect();
+  // Keep it on screen: below the button, nudged left if it would overflow.
+  pad.style.top = Math.min(r.bottom + 6, window.innerHeight - pad.offsetHeight - 8) + 'px';
+  pad.style.left = Math.max(8, Math.min(r.left, window.innerWidth - pad.offsetWidth - 8)) + 'px';
+  setTimeout(() => document.addEventListener('click', closeEmojiOnce), 0);
+}
+function closeEmojiOnce(ev) {
+  const pad = document.querySelector('.emoji');
+  if (pad && !pad.contains(ev.target)) {
+    pad.remove();
+    document.removeEventListener('click', closeEmojiOnce);
+  }
+}
+function insertEmoji(targetId, ch) {
+  const box = $(targetId);
+  if (!box) return;
+  // Insert where the cursor is, not at the end.
+  const a = box.selectionStart ?? box.value.length;
+  const b = box.selectionEnd ?? box.value.length;
+  box.value = box.value.slice(0, a) + ch + box.value.slice(b);
+  box.focus();
+  const at = a + ch.length;
+  box.setSelectionRange(at, at);
+}
 
 async function sendText(key) {
   const target = key || openKey;
