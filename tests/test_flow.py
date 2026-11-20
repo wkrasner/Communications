@@ -1203,3 +1203,32 @@ class MedTaskHandoff(Base):
 
     def test_bad_kind_is_refused(self):
         self.assertEqual(self.post({"kind": "fax", "id": "t1"})[0], 400)
+
+
+class NameResolution(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_panel_reads_names_from_the_number_list_not_the_message(self):
+        page = self.page()
+        self.assertIn("api('GET', 'numbers')", page.split("async function refresh")[1][:600])
+        self.assertIn("g.name = names[key] || g.name", page)
+
+    def test_contacts_search_drops_the_country_code(self):
+        fn = self.page().split("function contactsLink")[1].split("async function")[0]
+        self.assertIn(r"^\+1(\d{10})$", fn)
+
+    def test_numbers_api_returns_what_the_lookup_needs(self):
+        h.ADMIN_TOKEN = "secret"
+        self.db["NUM#+16095550123"] = {"pk": "NUM#+16095550123", "gsi1pk": "NUMS",
+                                       "number": "+16095550123", "name": "Dr Smith",
+                                       "status": "name"}
+        r = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                              "rawPath": "/admin/api/numbers",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None, "body": ""}, None)
+        rows = json.loads(r["body"])
+        self.assertEqual(rows[0]["number"], "+16095550123")
+        self.assertEqual(rows[0]["name"], "Dr Smith")

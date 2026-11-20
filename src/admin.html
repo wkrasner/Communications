@@ -180,7 +180,7 @@
 let token = '';
 try { token = localStorage.getItem('adminToken') || ''; } catch (e) {}
 
-let calls = [], msgs = [], officeText = '';
+let calls = [], msgs = [], officeText = '', names = {};
 let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
 let picked = new Set();
 const narrow = window.matchMedia('(max-width: 720px)');
@@ -246,9 +246,14 @@ async function refresh() {
   if (tab === 'status') return;
   say('Loading…');
   try {
-    const [c, m, o] = await Promise.all([
-      api('GET', 'calls'), api('GET', 'messages'), api('GET', 'office-reply')]);
+    const [c, m, o, n] = await Promise.all([
+      api('GET', 'calls'), api('GET', 'messages'), api('GET', 'office-reply'),
+      api('GET', 'numbers')]);
     calls = c; msgs = m; officeText = o.text || '';
+    // Names are looked up fresh, not read off the message: a contact added
+    // after a text arrived would otherwise never show on it.
+    names = {};
+    for (const row of n) if (row.name) names[row.number] = row.name;
     say('');
   } catch (e) { say('Could not load — ' + e.message); return; }
   render();
@@ -262,6 +267,7 @@ function groups() {
     const g = by.get(key);
     g[kind].push(item);
     if (item.name && !g.name) g.name = item.name;
+    g.name = names[key] || g.name;
     if (item.ts > g.last) g.last = item.ts;
   };
   for (const c of calls) add(c.from, 'calls', c);
@@ -619,8 +625,13 @@ async function setTaskList(id) {
 
 /** Search Google Contacts for this person; falls back to the number itself. */
 function contactsLink(g) {
-  const q = encodeURIComponent(g.name || g.key);
-  return 'https://contacts.google.com/search/' + q;
+  let term = g.name;
+  if (!term) {
+    // "+16095550123" finds nothing; "6095550123" matches how Google stores it.
+    const m = /^\+1(\d{10})$/.exec(g.key);
+    term = m ? m[1] : g.key.replace(/^\+/, '');
+  }
+  return 'https://contacts.google.com/search/' + encodeURIComponent(term);
 }
 
 /** Hand one picked message to MedTask. Only what is pressed is sent. */
