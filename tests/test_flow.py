@@ -1052,3 +1052,28 @@ class Tasks(Base):
         code, out = self.post("/admin/api/task", {"contact": "22000", "text": "code"})
         self.assertEqual(code, 200)
         self.assertEqual(self.created[0][1], "Call back 22000")
+
+
+class ContactsLink(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_thread_links_to_a_contacts_search(self):
+        body = self.page()
+        self.assertIn("https://contacts.google.com/search/", body)
+        self.assertIn("contactsLink(g)", body)
+
+    def test_numbers_screen_links_to_contacts(self):
+        self.assertIn('href="https://contacts.google.com/"', self.page())
+
+    def test_links_open_safely_in_a_new_tab(self):
+        """Every anchor out to Google, not the URL used inside the helper."""
+        import re
+        anchors = re.findall(r"<a\b[^>]*>", self.page())
+        out = [a for a in anchors if "contacts.google.com" in a or "contactsLink" in a]
+        self.assertTrue(out)
+        for a in out:
+            self.assertIn('target="_blank"', a)
+            self.assertIn('rel="noopener"', a)
