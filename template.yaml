@@ -18,6 +18,8 @@ Parameters:
   SmsGatewayPass: { Type: String, Default: '', NoEcho: true }
   SmsApiKey: { Type: String, Default: '', NoEcho: true }
   VoiceAppId: { Type: String, Default: '', Description: 'Telnyx Voice API application id, for click-to-call' }
+  GoogleClientId: { Type: String, Default: '' }
+  GoogleClientSecret: { Type: String, Default: '', NoEcho: true }
   OpenAiApiKey: { Type: String, Default: '', NoEcho: true }
   RecordCalls: { Type: String, Default: 'off', AllowedValues: ['on', 'off'] }
 
@@ -88,6 +90,8 @@ Resources:
           SMS_GATEWAY_PASS: !Ref SmsGatewayPass
           SMS_API_KEY: !Ref SmsApiKey
           VOICE_APP_ID: !Ref VoiceAppId
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+          GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
           OPENAI_API_KEY: !Ref OpenAiApiKey
           RECORD_CALLS: !Ref RecordCalls
       Policies:
@@ -111,6 +115,11 @@ Resources:
           Properties:
             Schedule: 'rate(1 minute)'
             Input: '{"poll": true}'
+        SyncContacts:
+          Type: Schedule
+          Properties:
+            Schedule: 'rate(12 hours)'
+            Input: '{"contacts": true}'
 
 Outputs:
   WebhookUrl:

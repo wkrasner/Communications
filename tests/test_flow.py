@@ -797,3 +797,78 @@ class TextSize(Base):
 
     def test_inputs_stay_at_least_16px_so_phones_do_not_zoom(self):
         self.assertIn("font-size: max(16px, 1em)", self.page())
+
+
+class GoogleContacts(Base):
+    def setUp(self):
+        super().setUp()
+        h.ADMIN_TOKEN = "secret"
+        h.GOOGLE_CLIENT_ID, h.GOOGLE_CLIENT_SECRET = "cid", "csec"
+        import sys, types
+        self.fake = types.ModuleType("gcontacts")
+        self.fake.consent_url = lambda cid, uri, state: f"https://consent?state={state}"
+        self.fake.exchange_code = lambda *a: {"refresh_token": "RT"}
+        self.fake.access_token = lambda *a: "AT"
+        self.fake.connections = lambda token, page_limit=20: self.pairs
+        self.pairs = [("+1 215 555 1234", "Mom"), ("609-555-0123", "Dr Smith")]
+        sys.modules["gcontacts"] = self.fake
+
+    def tearDown(self):
+        import sys
+        sys.modules.pop("gcontacts", None)
+        h.GOOGLE_CLIENT_ID = h.GOOGLE_CLIENT_SECRET = ""
+
+    def req(self, method, path, headers=None, query=None, body=""):
+        return h.lambda_handler({"requestContext": {"http": {"method": method}},
+                                 "rawPath": path,
+                                 "headers": headers or {"host": "api.example.com"},
+                                 "queryStringParameters": query, "body": body}, None)
+
+    def start(self):
+        r = self.req("GET", "/admin/api/oauth-url",
+                     headers={"x-admin-token": "secret", "host": "api.example.com"})
+        return json.loads(r["body"])
+
+    def test_consent_url_uses_a_one_time_state(self):
+        out = self.start()
+        self.assertEqual(out["redirect_uri"], "https://api.example.com/oauth/callback")
+        state = out["url"].split("state=")[1]
+        self.assertIn(f"OAUTH#{state}", self.db)
+
+    def test_callback_stores_the_token_and_imports_names(self):
+        state = self.start()["url"].split("state=")[1]
+        r = self.req("GET", "/oauth/callback", query={"state": state, "code": "c"})
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(self.db["STATE#gtoken"]["refresh_token"], "RT")
+        self.assertEqual(self.db["NUM#+12155551234"]["name"], "Mom")
+        self.assertEqual(self.db["NUM#+16095550123"]["status"], "name")
+        self.assertNotIn(f"OAUTH#{state}", self.db)   # state is single use
+
+    def test_callback_with_an_unknown_state_is_refused(self):
+        r = self.req("GET", "/oauth/callback", query={"state": "forged", "code": "c"})
+        self.assertEqual(r["statusCode"], 400)
+        self.assertNotIn("STATE#gtoken", self.db)
+
+    def test_sync_never_overwrites_an_allow_or_block_choice(self):
+        self.db["NUM#+12155551234"] = {"pk": "NUM#+12155551234", "status": "block",
+                                       "name": "old"}
+        self.db["STATE#gtoken"] = {"refresh_token": "RT"}
+        h.sync_contacts()
+        entry = self.db["NUM#+12155551234"]
+        self.assertEqual(entry["status"], "block")     # decision kept
+        self.assertEqual(entry["name"], "Mom")         # name refreshed
+
+    def test_contacts_without_a_name_or_a_usable_number_are_skipped(self):
+        self.pairs = [("+12155551234", ""), ("x", "No Number"), ("+16095550123", "Ok")]
+        self.db["STATE#gtoken"] = {"refresh_token": "RT"}
+        out = h.sync_contacts()
+        self.assertEqual((out["written"], out["skipped"]), (1, 2))
+
+    def test_sync_without_a_token_says_so_rather_than_failing_silently(self):
+        out = h.sync_contacts()
+        self.assertIn("not connected", out["error"])
+
+    def test_scheduled_event_runs_a_sync(self):
+        self.db["STATE#gtoken"] = {"refresh_token": "RT"}
+        out = h.lambda_handler({"contacts": True}, None)
+        self.assertEqual(out["written"], 2)

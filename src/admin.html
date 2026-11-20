@@ -470,6 +470,7 @@ async function showStatus() {
   const row = (k, v) => `<div class="item"><b>${esc(k)}</b><div class="muted"
       style="word-break:break-all">${esc(v)}</div></div>`;
   const g = s.gmail || {};
+  const g2 = s.google_contacts || {};
   $('main').innerHTML = '<div class="thread">' + [
     row('Google Voice poll', g.error ? 'FAILED — ' + g.error
         : g.note ? g.note
@@ -493,6 +494,18 @@ async function showStatus() {
          New Jersey is one-party consent; some states a caller may be in are not.</div>`}
      </div>`,
     row('Office number', s.office_phone),
+    `<div class="item"><b>Google Contacts</b>
+       <div class="muted">${!s.has_google_client
+         ? 'No Google client id or secret set — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'
+         : !s.contacts_connected ? 'Not connected.'
+         : g2.error ? 'Last sync FAILED — ' + g2.error
+         : g2.note ? 'Connected. ' + g2.note
+         : `Connected — ${g2.written} name(s) written from ${g2.contacts} number(s) at ${when(g2.ts)}`}</div>
+       ${s.has_google_client ? `<div style="display:flex;gap:7px;margin-top:7px;flex-wrap:wrap">
+         <button class="small" onclick="connectContacts()">${s.contacts_connected ? 'Reconnect' : 'Connect'}</button>
+         ${s.contacts_connected ? '<button class="small" onclick="syncContacts()">Sync now</button>' : ''}
+       </div>` : ''}
+     </div>`,
     `<div class="item"><b>Google Voice texts</b>
        <div class="muted">Re-read the mailbox and rewrite every Google Voice
          message from scratch. Use after a parsing fix; nothing is duplicated.</div>
@@ -507,6 +520,25 @@ async function callOut(to) {
     const r = await api('POST', 'call', {to});
     say(r.ok ? r.note : 'Could not call — ' + r.note);
   } catch (e) { say('Could not call — ' + e.message); }
+}
+
+async function connectContacts() {
+  say('Asking Google…');
+  try {
+    const r = await api('GET', 'oauth-url');
+    if (r.error) { say(r.error); return; }
+    say('Approve the access in the window that opened, then come back.');
+    window.open(r.url, '_blank', 'noopener');
+  } catch (e) { say('Failed — ' + e.message); }
+}
+async function syncContacts() {
+  say('Syncing contacts…');
+  try {
+    const r = await api('POST', 'contacts-sync');
+    say(r.error ? 'Failed — ' + r.error
+        : `Wrote ${r.written} name(s) from ${r.contacts} number(s).`);
+    await showStatus();
+  } catch (e) { say('Failed — ' + e.message); }
 }
 
 async function reparse() {

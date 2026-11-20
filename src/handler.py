@@ -46,6 +46,8 @@ SMS_API_URL = os.environ.get(
 )
 OFFICE_PHONE = os.environ.get("OFFICE_PHONE", "")
 CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_URL = "https://api.openai.com/v1/audio/transcriptions"
 OPENAI_MODEL = os.environ.get("TRANSCRIBE_MODEL", "whisper-1")
@@ -575,6 +577,52 @@ def send_text(contact, text, via=""):
     return True, "sent from your cell"
 
 
+def redirect_uri(event):
+    host = (event.get("headers") or {}).get("host", "")
+    return f"https://{host}/oauth/callback" if host else ""
+
+
+def sync_contacts():
+    """Pull names from Google Contacts, without touching allow/block choices."""
+    status = {"ts": now_iso()}
+    if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
+        status["error"] = "no Google client id or secret configured"
+    else:
+        row = db_get("STATE#gtoken") or {}
+        if not row.get("refresh_token"):
+            status["error"] = "not connected to Google Contacts yet"
+        else:
+            try:
+                import gcontacts
+                token = gcontacts.access_token(
+                    GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, row["refresh_token"])
+                pairs = gcontacts.connections(token)
+            except Exception as e:
+                status["error"] = f"{type(e).__name__}: {e}"[:300]
+                print(f"contact sync failed: {status['error']}")
+            else:
+                named = skipped = 0
+                for raw, name in pairs:
+                    num = normalize(raw)
+                    if not num or not name:
+                        skipped += 1
+                        continue
+                    existing = db_get(f"NUM#{num}")
+                    if existing:
+                        # Keep whatever allow/block decision is already there.
+                        if existing.get("name") != name:
+                            db_update(f"NUM#{num}", name=name)
+                            named += 1
+                    else:
+                        db_put({"pk": f"NUM#{num}", "sk": "META", "gsi1pk": "NUMS",
+                                "gsi1sk": num, "number": num, "name": name,
+                                "status": "name"})
+                        named += 1
+                status.update(contacts=len(pairs), written=named, skipped=skipped)
+    db_put({"pk": "STATE#gsync", "sk": "META", **status})
+    return status
+
+
 def poll_gmail():
     """Pull new Google Voice notification emails into the message store.
 
@@ -644,7 +692,7 @@ def clean(item):
     return {k: v for k, v in item.items() if k not in ("pk", "sk", "gsi1pk", "gsi1sk")}
 
 
-def admin_api(method, path, query, body):
+def admin_api(method, path, query, body, event=None):
     if path == "/admin/api/calls" and method == "GET":
         return 200, [clean(i) for i in db_list("CALLS", 100)]
     if path == "/admin/api/messages" and method == "GET":
@@ -714,6 +762,20 @@ def admin_api(method, path, query, body):
         db_put({"pk": "SETTING#record", "sk": "META", "on": on})
         return 200, {"record_calls": on}
 
+    if path == "/admin/api/oauth-url" and method == "GET":
+        if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
+            return 400, {"error": "no Google client id or secret configured"}
+        import gcontacts
+        # One-time state, so a stray callback cannot plant someone else's token.
+        state = base64.urlsafe_b64encode(os.urandom(18)).decode().rstrip("=")
+        db_put({"pk": f"OAUTH#{state}", "sk": "META", "ts": now_iso()})
+        uri = redirect_uri(event or {})
+        return 200, {"url": gcontacts.consent_url(GOOGLE_CLIENT_ID, uri, state),
+                     "redirect_uri": uri}
+
+    if path == "/admin/api/contacts-sync" and method == "POST":
+        return 200, sync_contacts()
+
     if path == "/admin/api/status" and method == "GET":
         gv = db_get("STATE#gvpoll") or {}
         return 200, {
@@ -725,6 +787,10 @@ def admin_api(method, path, query, body):
             "has_openai_key": bool(OPENAI_KEY),
             "record_calls": recording_on(),
             "office_phone": OFFICE_PHONE or "(not set)",
+            "google_contacts": clean(db_get("STATE#gsync") or {}) or
+                               {"note": "no contact sync has run yet"},
+            "contacts_connected": bool((db_get("STATE#gtoken") or {}).get("refresh_token")),
+            "has_google_client": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
         }
     if path == "/admin/api/poll" and method == "POST":
         # Re-reads the whole mailbox; messages keep their ids, so a reparse
@@ -795,6 +861,8 @@ def lambda_handler(event, context):
     # Background invocations rather than HTTP requests.
     if event.get("poll"):
         return poll_gmail()
+    if event.get("contacts"):
+        return sync_contacts()
     if event.get("transcribe"):
         return run_transcription(event["transcribe"])
 
@@ -826,6 +894,46 @@ def lambda_handler(event, context):
             print(f"webhook error on {path}: {e!r}")
         return respond(200, {"ok": True})
 
+    if path == "/oauth/callback" and method == "GET":
+        q = event.get("queryStringParameters") or {}
+        page = ("<!doctype html><meta name=viewport content='width=device-width,"
+                "initial-scale=1'><body style=\"font:16px system-ui;padding:28px;"
+                "max-width:34em;margin:auto\"><h2>{h}</h2><p>{p}</p>"
+                "<p><a href='/admin'>Back to Communications</a></p>")
+        if q.get("error"):
+            return respond(200, page.format(h="Not connected",
+                                            p=f"Google said: {q['error']}"),
+                           "text/html; charset=utf-8")
+        state, code = q.get("state", ""), q.get("code", "")
+        pending = db_get(f"OAUTH#{state}") if state else None
+        if not pending:
+            return respond(400, page.format(
+                h="Not connected",
+                p="That link has already been used or did not come from here. "
+                  "Start again from the Status screen."), "text/html; charset=utf-8")
+        db_delete(f"OAUTH#{state}")
+        try:
+            import gcontacts
+            tok = gcontacts.exchange_code(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+                                          redirect_uri(event), code)
+        except Exception as e:
+            return respond(200, page.format(h="Not connected", p=f"{e}"),
+                           "text/html; charset=utf-8")
+        if not tok.get("refresh_token"):
+            return respond(200, page.format(
+                h="Not connected",
+                p="Google returned no refresh token. Remove this app at "
+                  "myaccount.google.com/permissions and try once more."),
+                "text/html; charset=utf-8")
+        db_put({"pk": "STATE#gtoken", "sk": "META",
+                "refresh_token": tok["refresh_token"], "ts": now_iso()})
+        out = sync_contacts()
+        note = (f"Imported names for {out.get('written', 0)} number(s)."
+                if not out.get("error") else f"Connected, but the first sync failed: "
+                f"{out['error']}")
+        return respond(200, page.format(h="Connected to Google Contacts", p=note),
+                       "text/html; charset=utf-8")
+
     if path == "/manifest.webmanifest" and method == "GET":
         # Lets Android install the panel to the home screen as an app.
         return respond(200, {
@@ -855,7 +963,8 @@ def lambda_handler(event, context):
             body = json.loads(raw_bytes) if raw_bytes else {}
         except ValueError:
             return respond(400, {"error": "bad json"})
-        code, out = admin_api(method, path, event.get("queryStringParameters") or {}, body)
+        code, out = admin_api(method, path,
+                              event.get("queryStringParameters") or {}, body, event)
         return respond(code, out)
 
     return respond(404, {"error": "not found"})
