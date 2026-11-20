@@ -20,6 +20,8 @@ Parameters:
   VoiceAppId: { Type: String, Default: '', Description: 'Telnyx Voice API application id, for click-to-call' }
   GoogleClientId: { Type: String, Default: '' }
   GoogleClientSecret: { Type: String, Default: '', NoEcho: true }
+  MedtaskCommsUrl: { Type: String, Default: '' }
+  MedtaskCommsSecret: { Type: String, Default: '', NoEcho: true }
   OpenAiApiKey: { Type: String, Default: '', NoEcho: true }
   RecordCalls: { Type: String, Default: 'off', AllowedValues: ['on', 'off'] }
 
@@ -92,6 +94,8 @@ Resources:
           VOICE_APP_ID: !Ref VoiceAppId
           GOOGLE_CLIENT_ID: !Ref GoogleClientId
           GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
+          MEDTASK_COMMS_URL: !Ref MedtaskCommsUrl
+          MEDTASK_COMMS_SECRET: !Ref MedtaskCommsSecret
           OPENAI_API_KEY: !Ref OpenAiApiKey
           RECORD_CALLS: !Ref RecordCalls
       Policies:

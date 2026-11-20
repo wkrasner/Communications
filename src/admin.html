@@ -296,7 +296,9 @@ function callsHtml(g) {
         ${c.voicemail ? `<button class="small" onclick="play('${esc(c.voicemail)}', this)">&#9654; Voicemail</button>` : ''}
         ${c.recording ? `<button class="small" onclick="play('${esc(c.recording)}', this)">&#9654; Recording</button>` : ''}
       </div>
-      <div class="muted">${when(c.ts)}</div>
+      <div class="muted">${when(c.ts)}
+        <button class="small" style="margin-left:6px"
+          onclick="toMedtask('call','${esc(c.pk || c.id || '')}', this)">&#10140; MedTask</button></div>
       ${c.vm_transcript ? `<div class="script">${esc(c.vm_transcript)}</div>` : ''}
       ${c.transcript ? `<div class="script">${esc(c.transcript)}</div>` : ''}
       ${c.error ? `<div class="muted" style="word-break:break-all">${esc(c.error)}</div>` : ''}
@@ -308,7 +310,9 @@ function textsHtml(g) {
   return g.msgs.map(m => `
     <div class="item ${m.dir === 'out' ? 'out' : ''}">
       <div class="bubble">${esc(m.text) || '<i>no text</i>'}</div>
-      <div class="muted">${esc(m.line)} · ${when(m.ts)}${m.media ? ` · ${m.media} attachment(s)` : ''}</div>
+      <div class="muted">${esc(m.line)} · ${when(m.ts)}${m.media ? ` · ${m.media} attachment(s)` : ''}
+        ${m.dir !== 'out' ? `<button class="small" style="margin-left:6px"
+          onclick="toMedtask('text','${esc(m.pk || m.id || '')}', this)">&#10140; MedTask</button>` : ''}</div>
     </div>`).join('');
 }
 
@@ -617,6 +621,24 @@ async function setTaskList(id) {
 function contactsLink(g) {
   const q = encodeURIComponent(g.name || g.key);
   return 'https://contacts.google.com/search/' + q;
+}
+
+/** Hand one picked message to MedTask. Only what is pressed is sent. */
+async function toMedtask(kind, pk, btn) {
+  const id = String(pk).replace(/^(MSG|CALL)#/, '');
+  if (!id) { say('That item has no id to send.'); return; }
+  const was = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const r = await api('POST', 'medtask', {kind, id});
+    btn.textContent = r.ok ? (r.dup ? '✓ Already sent' : '✓ Task made') : '✗ Failed';
+    say(r.note);
+    if (!r.ok) alert('Not sent to MedTask.\n\n' + r.note);
+  } catch (e) {
+    btn.textContent = '✗ Failed';
+    say('Not sent — ' + e.message);
+  }
+  setTimeout(() => { btn.textContent = was; btn.disabled = false; }, 4000);
 }
 
 async function makeTask(key) {

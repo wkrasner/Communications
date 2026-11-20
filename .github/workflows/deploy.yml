@@ -56,6 +56,8 @@ jobs:
           VoiceAppId: ${{ secrets.VOICE_APP_ID }}
           GoogleClientId: ${{ secrets.GOOGLE_CLIENT_ID }}
           GoogleClientSecret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MedtaskCommsUrl: ${{ secrets.MEDTASK_COMMS_URL }}
+          MedtaskCommsSecret: ${{ secrets.MEDTASK_COMMS_SECRET }}
           OpenAiApiKey: ${{ secrets.OPENAI_API_KEY }}
           RecordCalls: ${{ vars.RECORD_CALLS }}
         run: |
@@ -70,6 +72,7 @@ jobs:
                      CellNumber OfficePhone GmailUser GmailAppPassword GatewaySecret \
                      SmsGatewayUser SmsGatewayPass SmsApiKey VoiceAppId \
                      GoogleClientId GoogleClientSecret \
+                     MedtaskCommsUrl MedtaskCommsSecret \
                      OpenAiApiKey RecordCalls; do
             value="${!key}"
             value="${value//[[:space:]]/}"

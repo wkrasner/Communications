@@ -45,6 +45,10 @@ Before turning call recording on: New Jersey is a one-party-consent state, but s
 
 **Make task** puts a Google Task on whichever list you pick on the Status screen — the same lists the Google Tasks kanban board reads, so a task filed here appears there with nothing in between. The task is titled for the caller and carries their latest message in the notes. It is a button, not automatic: keyword matching flags more than it should, and a board filling itself with false positives is worse than none.
 
+**➜ MedTask** appears on each inbound text and each call. It hands that one item to MedTask's `/telnyx/comms-task` webhook, which files it as a Return Call task on the kanban. Signed HMAC-SHA256 over `<timestamp>.<body>`, with a 5-minute skew window; set `MEDTASK_COMMS_URL` and `MEDTASK_COMMS_SECRET`.
+
+Only the item pressed is sent — never the thread. The `id` is the item's own key, so MedTask dedupes a retry rather than making a second task, and the button reports back which happened. A call carries its voicemail transcript when there is one and no text at all when there is not; a placeholder like "(transcribing…)" is never sent as content.
+
 Not built yet: the AI screener, scheduled/queued texts.
 
 ## Setup

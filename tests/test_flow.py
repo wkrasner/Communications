@@ -1,4 +1,7 @@
 """Simulates Telnyx webhook sequences against the handler with fake storage and a fake Telnyx."""
+import hashlib
+import hmac
+import io
 import json
 import os
 import sys
@@ -1084,3 +1087,119 @@ class ContactsLink(Base):
         for a in out:
             self.assertIn('target="_blank"', a)
             self.assertIn('rel="noopener"', a)
+
+
+class MedTaskHandoff(Base):
+    def setUp(self):
+        super().setUp()
+        h.ADMIN_TOKEN = "secret"
+        h.MEDTASK_URL = "https://medtask.example/telnyx/comms-task"
+        h.MEDTASK_SECRET = "sh4red"
+        self.sent, self.real = [], h.urllib.request.urlopen
+        self.status, self.reply = 201, {"success": True,
+                                        "data": {"taskId": "T1", "dup": False}}
+
+        def fake(req, timeout=0):
+            self.sent.append(req)
+            body = json.dumps(self.reply).encode()
+            if self.status >= 400:
+                raise h.urllib.error.HTTPError(
+                    req.full_url, self.status, "err", {}, io.BytesIO(body))
+            return type("R", (), {"status": self.status, "read": lambda s: body,
+                                  "__enter__": lambda s: s,
+                                  "__exit__": lambda s, *a: None})()
+        h.urllib.request.urlopen = fake
+
+    def tearDown(self):
+        h.urllib.request.urlopen = self.real
+        h.MEDTASK_URL = h.MEDTASK_SECRET = ""
+
+    def post(self, payload):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": "/admin/api/medtask",
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps(payload)}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def a_text(self):
+        h.store_message("t1", "+12155551234", "", "Cell", "my chest hurts",
+                        src="cell", name="Mary Smith")
+
+    def test_text_is_sent_signed_and_as_one_message(self):
+        self.a_text()
+        code, out = self.post({"kind": "text", "id": "t1"})
+        self.assertEqual((code, out["ok"]), (200, True))
+        req = self.sent[0]
+        body = json.loads(req.data)
+        self.assertEqual(body["kind"], "text")
+        self.assertEqual(body["phone"], "+12155551234")
+        self.assertEqual(body["text"], "my chest hurts")
+        self.assertEqual(body["name"], "Mary Smith")
+        ts = req.headers["X-comms-timestamp"]
+        want = hmac.new(b"sh4red", ts.encode() + b"." + req.data,
+                        hashlib.sha256).hexdigest()
+        self.assertEqual(req.headers["X-comms-signature"], f"sha256={want}")
+
+    def test_id_is_stable_so_a_retry_does_not_make_a_second_task(self):
+        self.a_text()
+        self.post({"kind": "text", "id": "t1"})
+        self.post({"kind": "text", "id": "t1"})
+        self.assertEqual(json.loads(self.sent[0].data)["id"],
+                         json.loads(self.sent[1].data)["id"])
+
+    def test_duplicate_is_reported_as_already_sent(self):
+        self.a_text()
+        self.status, self.reply = 200, {"data": {"taskId": "T1", "dup": True}}
+        code, out = self.post({"kind": "text", "id": "t1"})
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["dup"])
+
+    def test_voicemail_sends_its_transcript(self):
+        self.db["CALL#S9"] = {"pk": "CALL#S9", "from": "+12155551234",
+                              "ts": h.now_iso(), "voicemail": "voicemail/S9.mp3",
+                              "vm_transcript": "please call me back"}
+        self.post({"kind": "call", "id": "S9"})
+        body = json.loads(self.sent[0].data)
+        self.assertEqual(body["kind"], "voicemail")
+        self.assertEqual(body["text"], "please call me back")
+
+    def test_a_call_with_no_transcript_sends_none(self):
+        self.db["CALL#S8"] = {"pk": "CALL#S8", "from": "+12155551234",
+                              "ts": h.now_iso(), "vm_transcript": "(transcribing…)"}
+        self.post({"kind": "call", "id": "S8"})
+        body = json.loads(self.sent[0].data)
+        self.assertEqual(body["kind"], "call")
+        self.assertNotIn("text", body)
+
+    def test_thread_history_is_never_included(self):
+        self.a_text()
+        h.store_message("t2", "+12155551234", "", "Cell", "and another thing",
+                        src="cell")
+        self.post({"kind": "text", "id": "t1"})
+        body = json.loads(self.sent[0].data)
+        self.assertEqual(body["text"], "my chest hurts")
+        self.assertNotIn("and another thing", json.dumps(body))
+
+    def test_a_rejected_signature_is_reported_plainly(self):
+        self.a_text()
+        self.status, self.reply = 401, {"error": "bad signature"}
+        code, out = self.post({"kind": "text", "id": "t1"})
+        self.assertEqual(code, 502)
+        self.assertIn("signature", out["note"])
+
+    def test_switched_off_in_medtask_is_reported(self):
+        self.a_text()
+        self.status, self.reply = 503, {"error": "disabled"}
+        code, out = self.post({"kind": "text", "id": "t1"})
+        self.assertIn("Switched off", out["note"])
+
+    def test_unconfigured_says_so_without_calling_out(self):
+        h.MEDTASK_URL = ""
+        self.a_text()
+        code, out = self.post({"kind": "text", "id": "t1"})
+        self.assertFalse(out["ok"])
+        self.assertEqual(self.sent, [])
+
+    def test_bad_kind_is_refused(self):
+        self.assertEqual(self.post({"kind": "fax", "id": "t1"})[0], 400)

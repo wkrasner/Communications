@@ -11,6 +11,7 @@ Call flow
   unknown caller   -> "press 1" challenge; pass -> rings softphone; fail -> voicemail
 """
 import base64
+import hashlib
 import hmac
 import json
 import os
@@ -46,6 +47,8 @@ SMS_API_URL = os.environ.get(
 )
 OFFICE_PHONE = os.environ.get("OFFICE_PHONE", "")
 CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
+MEDTASK_URL = os.environ.get("MEDTASK_COMMS_URL", "").strip()
+MEDTASK_SECRET = os.environ.get("MEDTASK_COMMS_SECRET", "").strip()
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -627,6 +630,65 @@ def sync_contacts():
     return status
 
 
+def medtask_task(kind, ident, urgent=False, patient=None):
+    """Hand one picked call, text or voicemail to MedTask as a task.
+
+    One message only — never the thread. MedTask dedupes on `id`, so a retry
+    after a timeout cannot produce a second task.
+    """
+    if not (MEDTASK_URL and MEDTASK_SECRET):
+        return 0, {"error": "MedTask webhook is not configured"}
+    pk = f"MSG#{ident}" if kind == "text" else f"CALL#{ident}"
+    item = db_get(pk)
+    if not item:
+        return 0, {"error": "that message is no longer here"}
+
+    phone = item.get("contact") or item.get("from") or ""
+    if kind == "text":
+        text = item.get("text", "")
+    else:
+        # A voicemail is a call with a transcript; send the words either way.
+        text = item.get("vm_transcript") or item.get("transcript") or ""
+        if text.startswith("("):      # "(transcribing…)" / "(no transcript)"
+            text = ""
+        kind = "voicemail" if item.get("voicemail") else "call"
+
+    payload = {
+        "id": f"comms-{item['pk']}", "kind": kind, "phone": phone,
+        "name": item.get("name", ""), "at": item.get("ts", now_iso()),
+        "urgent": bool(urgent),
+    }
+    if text:
+        payload["text"] = text[:4000]
+    for field in ("patientName", "patientDob", "ecwAccountNumber"):
+        value = (patient or {}).get(field)
+        if value:
+            payload[field] = str(value)[:120]
+    if kind == "text" and not payload.get("text"):
+        return 0, {"error": "that text has no content to send"}
+
+    body = json.dumps(payload).encode()
+    ts = str(int(time.time()))
+    sig = hmac.new(MEDTASK_SECRET.encode(),
+                   ts.encode() + b"." + body, hashlib.sha256).hexdigest()
+    req = urllib.request.Request(MEDTASK_URL, data=body, method="POST", headers={
+        "Content-Type": "application/json",
+        "X-Comms-Timestamp": ts,
+        "X-Comms-Signature": f"sha256={sig}",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:400].decode("utf-8", "replace")
+        try:
+            return e.code, json.loads(detail)
+        except ValueError:
+            return e.code, {"error": detail}
+    except Exception as e:
+        return 0, {"error": f"could not reach MedTask: {e}"}
+
+
 def google_token():
     """A fresh access token, or None if Google was never connected."""
     row = db_get("STATE#gtoken") or {}
@@ -721,7 +783,9 @@ def handle_webhook(body):
 # ---------- admin ----------
 
 def clean(item):
-    return {k: v for k, v in item.items() if k not in ("pk", "sk", "gsi1pk", "gsi1sk")}
+    """Strip index keys, but keep pk: the panel needs it to name one message."""
+    out = {k: v for k, v in item.items() if k not in ("sk", "gsi1pk", "gsi1sk")}
+    return out
 
 
 def admin_api(method, path, query, body, event=None):
@@ -808,6 +872,27 @@ def admin_api(method, path, query, body, event=None):
             return 502, {"ok": False, "note": f"could not place the call: {e}"}
         return 200, {"ok": True, "note": "Your phone is ringing — answer to connect."}
 
+    if path == "/admin/api/medtask" and method == "POST":
+        kind = (body.get("kind") or "").strip()
+        ident = (body.get("id") or "").strip()
+        if kind not in ("text", "call") or not ident:
+            return 400, {"error": "need kind text or call, and an id"}
+        status, out = medtask_task(kind, ident, bool(body.get("urgent")),
+                                   body.get("patient"))
+        note = {
+            201: "Task made in MedTask.",
+            200: "Already sent — same task, nothing new.",
+            400: "MedTask refused the message",
+            401: "MedTask rejected the signature — check the shared secret",
+            503: "Switched off in MedTask, or no secret made there yet",
+        }.get(status, "MedTask could not be reached")
+        detail = out.get("error") or ""
+        ok = status in (200, 201)
+        return (200 if ok else 502), {
+            "ok": ok, "dup": bool((out.get("data") or {}).get("dup")),
+            "note": note + (f" — {detail}" if detail and not ok else ""),
+        }
+
     if path == "/admin/api/task" and method == "POST":
         contact = normalize(body.get("contact") or "") or (body.get("contact") or "").strip()
         text = (body.get("text") or "").strip()
@@ -871,6 +956,7 @@ def admin_api(method, path, query, body, event=None):
                                {"note": "no contact sync has run yet"},
             "contacts_connected": bool((db_get("STATE#gtoken") or {}).get("refresh_token")),
             "has_google_client": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
+            "medtask_ready": bool(MEDTASK_URL and MEDTASK_SECRET),
         }
     if path == "/admin/api/poll" and method == "POST":
         # Re-reads the whole mailbox; messages keep their ids, so a reparse
