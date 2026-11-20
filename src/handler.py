@@ -777,6 +777,10 @@ def poll_mail():
         for m in msgs:
             if m["bulk"]:
                 continue        # newsletters stay in Gmail
+            # Voice notifications are already texts in the Comms tab; showing
+            # them here too would double every message.
+            if m["from_addr"].endswith("txt.voice.google.com"):
+                continue
             ts = m["ts"] or now_iso()
             db_put({
                 "pk": f"EMAIL#{label}#{m['uid']}", "sk": "META",

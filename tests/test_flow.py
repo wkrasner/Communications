@@ -1395,6 +1395,16 @@ class Email(Base):
         self.assertEqual(self.db["EMAIL#personal#1"]["body"], "are you free")
         self.assertFalse(self.db["EMAIL#personal#1"]["headers_only"])
 
+    def test_google_voice_notifications_do_not_appear_as_email(self):
+        self.mail["me@gmail.com"].append(
+            {"uid": 4, "from_addr": "reply+abc@txt.voice.google.com",
+             "from_name": "Mary", "subject": "New text message",
+             "ts": "2026-11-20T12:00:00-05:00", "body": "hi", "message_id": "<d>",
+             "bulk": False})
+        h.poll_mail()
+        self.assertNotIn("EMAIL#personal#4", self.db)
+        self.assertIn("EMAIL#personal#1", self.db)   # ordinary mail still lands
+
     def test_bulk_mail_is_dropped(self):
         h.poll_mail()
         self.assertNotIn("EMAIL#practice#3", self.db)
