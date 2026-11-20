@@ -750,6 +750,10 @@ def admin_api(method, path, query, body, event=None):
             return 400, {"error": "bad number"}
         if not (RING_TARGET and API_KEY):
             return 502, {"ok": False, "note": "no softphone configured"}
+        if not os.environ.get("VOICE_APP_ID"):
+            return 502, {"ok": False, "note":
+                         "VOICE_APP_ID is not set — add the Voice API "
+                         "application's id and redeploy"}
         # Ring his handset first, then dial out and bridge, so the audio and
         # the mute/speaker controls stay native on the phone.
         did = os.environ.get("GV_DID") or os.environ.get("CELL_DID") or ""
@@ -806,6 +810,8 @@ def admin_api(method, path, query, body, event=None):
             "has_sms_api_key": bool(SMS_API_KEY),
             "has_gateway_secret": bool(GATEWAY_SECRET),
             "has_openai_key": bool(OPENAI_KEY),
+            "can_call_out": bool(RING_TARGET and API_KEY
+                                 and os.environ.get("VOICE_APP_ID")),
             "record_calls": recording_on(),
             "office_phone": OFFICE_PHONE or "(not set)",
             "google_contacts": clean(db_get("STATE#gsync") or {}) or

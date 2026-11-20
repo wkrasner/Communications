@@ -731,6 +731,7 @@ class ClickToCall(Base):
     def setUp(self):
         super().setUp()
         h.API_KEY, h.RING_TARGET = "k", "sip:me@sip.telnyx.com"
+        os.environ["VOICE_APP_ID"] = "app-1"
         self.posted, self.real = [], h.urllib.request.urlopen
 
         def fake(req, timeout=0):
@@ -741,6 +742,7 @@ class ClickToCall(Base):
 
     def tearDown(self):
         h.urllib.request.urlopen = self.real
+        os.environ.pop("VOICE_APP_ID", None)
 
     def call(self, to):
         h.ADMIN_TOKEN = "secret"
@@ -770,6 +772,13 @@ class ClickToCall(Base):
 
     def test_bad_number_is_refused(self):
         self.assertEqual(self.call("nonsense")[0], 400)
+
+    def test_missing_voice_app_id_says_which_setting_is_missing(self):
+        os.environ.pop("VOICE_APP_ID", None)
+        code, out = self.call("215-555-1234")
+        self.assertEqual(code, 502)
+        self.assertIn("VOICE_APP_ID", out["note"])
+        self.assertEqual(self.posted, [])   # nothing dialled
 
 
 class TextSize(Base):
