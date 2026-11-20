@@ -49,7 +49,18 @@ Before turning call recording on: New Jersey is a one-party-consent state, but s
 
 Only the item pressed is sent — never the thread. The `id` is the item's own key, so MedTask dedupes a retry rather than making a second task, and the button reports back which happened. A call carries its voicemail transcript when there is one and no text at all when there is not; a placeholder like "(transcribing…)" is never sent as content.
 
-Not built yet: the AI screener, scheduled/queued texts.
+## Email
+
+An **Email** tab beside Comms, both mailboxes in one list, each message tagged with the account it arrived on. Polled every 5 minutes.
+
+- **Personal (`GMAIL_USER`)** — read in full and replied to from the panel, out through the same account.
+- **Practice (`WORK_GMAIL_USER`)** — **headers only**: sender, subject, time. No body is fetched, let alone stored, and there is no reply box; the thread links out to Gmail instead.
+
+That split is deliberate and temporary. The practice mailbox carries PHI, and this app authenticates with a single shared token in `localStorage` — no per-user identity, no MFA, no audit trail. Storing patient mail behind that would be weaker than the system it already lives in. **Before the practice account is switched to full bodies, this app needs Cognito sign-in, MFA and an audit trail.** Until then `want_body=False` is the safeguard, applied at fetch time so the body never reaches this process at all.
+
+Newsletters and machine mail are dropped on the way in — `List-Unsubscribe`, `List-Id`, `Precedence: bulk`, `Auto-Submitted`, and no-reply style senders — because a comms panel full of receipts is no use. A first run reads 30 days, then follows UIDs.
+
+Not built yet: the AI screener, scheduled/queued texts, and the auth work above.
 
 ## Setup
 

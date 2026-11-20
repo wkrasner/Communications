@@ -136,7 +136,8 @@
 </header>
 
 <div class="bar" id="menu" hidden>
-  <button id="tabInbox" onclick="show('inbox')">&#9993; Inbox</button>
+  <button id="tabInbox" onclick="show('inbox')">&#128222; Comms</button>
+  <button id="tabMail" onclick="show('mail')">&#9993; Email</button>
   <button id="tabNums" onclick="show('nums')">&#128100; Numbers</button>
   <button id="tabArch" onclick="show('archived')">&#128230; Archived</button>
   <button onclick="showStatus()">&#9881; Status</button>
@@ -194,6 +195,7 @@ let token = '';
 try { token = localStorage.getItem('adminToken') || ''; } catch (e) {}
 
 let calls = [], msgs = [], officeText = '', names = {};
+let emails = [], openMail = null;
 let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
 let picked = new Set();
 const narrow = window.matchMedia('(max-width: 720px)');
@@ -249,14 +251,17 @@ function show(t) {
   tab = t; openKey = null; picked.clear(); showSel();
   $('menu').hidden = true;
   $('tabInbox').className = t === 'inbox' ? 'on' : '';
+  $('tabMail').className = t === 'mail' ? 'on' : '';
   $('tabArch').className = t === 'archived' ? 'on' : '';
   $('tabNums').className = t === 'nums' ? 'on' : '';
+  openMail = null;
   t === 'nums' ? loadNums() : refresh();
 }
 
 async function refresh() {
   if (tab === 'nums') return loadNums();
   if (tab === 'status') return;
+  if (tab === 'mail') return refreshMail();
   say('Loading…');
   try {
     const [c, m, o, n] = await Promise.all([
@@ -270,6 +275,116 @@ async function refresh() {
     say('');
   } catch (e) { say('Could not load — ' + e.message); return; }
   render();
+}
+
+async function refreshMail() {
+  say('Loading…');
+  try {
+    const [e, n] = await Promise.all([api('GET', 'emails'), api('GET', 'numbers')]);
+    emails = e;
+    names = {};
+    for (const row of n) if (row.name) names[row.number] = row.name;
+    say('');
+  } catch (err) { say('Could not load — ' + err.message); return; }
+  renderMail();
+}
+
+/** Mail grouped by the person, newest first; both accounts in one list. */
+function mailGroups() {
+  const by = new Map();
+  for (const m of emails) {
+    const key = (m.dir === 'out' ? m.to_addr : m.from_addr) || '(unknown)';
+    if (!by.has(key)) by.set(key, {key, name: '', items: [], last: ''});
+    const g = by.get(key);
+    g.items.push(m);
+    if (m.from_name && !g.name && m.dir !== 'out') g.name = m.from_name;
+    if (m.ts > g.last) g.last = m.ts;
+  }
+  const q = ($('search').value || '').trim().toLowerCase();
+  let list = [...by.values()];
+  if (q) list = list.filter(g =>
+    (g.name + ' ' + g.key).toLowerCase().includes(q) ||
+    g.items.some(m => ((m.subject || '') + ' ' + (m.body || '')).toLowerCase().includes(q)));
+  for (const g of list) g.items.sort((a, b) => b.ts.localeCompare(a.ts));
+  return list.sort((a, b) => b.last.localeCompare(a.last));
+}
+
+function mailTag(m) {
+  return m.account === 'practice'
+    ? '<span class="tag" style="border-color:#b45309;color:#b45309">practice</span>'
+    : '<span class="tag">personal</span>';
+}
+
+function renderMail() {
+  $('title').textContent = 'Email';
+  $('searchbar').hidden = false;
+  $('composer').hidden = true;
+  $('back').hidden = !openMail;
+  const list = mailGroups();
+
+  if (openMail) {
+    const g = list.find(x => x.key === openMail);
+    if (!g) { openMail = null; renderMail(); return; }
+    $('title').textContent = g.name || g.key;
+    const practice = g.items.every(m => m.account === 'practice');
+    $('main').innerHTML = `
+      <div class="thread">
+        ${practice ? `<div class="muted" style="margin-bottom:10px">
+          Practice mailbox — subjects only here.
+          <a href="https://mail.google.com/mail/u/?authuser=${esc(g.items[0].address || '')}"
+             target="_blank" rel="noopener" style="color:var(--accent)">Open in Gmail</a></div>`
+        : `<div class="reply" style="margin:0 0 12px">
+             <button class="small" onclick="emojiPad('mailbody', this)" style="font-size:1em">&#128512;</button>
+             <input id="mailsubj" placeholder="Subject"
+                    value="${esc(g.items[0].subject ? 'Re: ' + g.items[0].subject.replace(/^Re:\s*/i, '') : '')}">
+           </div>
+           <div class="reply" style="margin:0 0 12px">
+             <input id="mailbody" placeholder="Reply…"
+                    onkeydown="if(event.key==='Enter')sendMail('${esc(g.key)}')">
+             <button class="primary small" onclick="sendMail('${esc(g.key)}')">&#10148; Send</button>
+           </div>`}
+        ${g.items.map(m => `
+          <div class="item ${m.dir === 'out' ? 'out' : ''}">
+            <div><b>${esc(m.subject) || '(no subject)'}</b> ${mailTag(m)}</div>
+            ${m.body ? `<div class="script">${esc(m.body)}</div>`
+                     : '<div class="muted">Subject only — open in Gmail to read it.</div>'}
+            <div class="muted">${esc(m.dir === 'out' ? 'You → ' + (m.to_addr || '') : m.from_addr)}
+              · ${when(m.ts)}</div>
+          </div>`).join('')}
+      </div>`;
+    return;
+  }
+
+  if (!list.length) {
+    $('main').innerHTML = '<p class="muted" style="padding:16px">No mail yet.</p>';
+    return;
+  }
+  $('main').innerHTML = list.map(g => {
+    const top = g.items[0];
+    return `
+    <div class="row">
+      <div class="grow" style="cursor:pointer" onclick="openMailThread('${esc(g.key)}')">
+        <div class="ttl">${esc(g.name || g.key)} ${mailTag(top)}</div>
+        <div class="prev muted">${esc(top.subject) || '(no subject)'}</div>
+      </div>
+      <div class="muted" style="text-align:right">${when(g.last)}</div>
+    </div>`;
+  }).join('<div class="sep"></div>');
+}
+
+function openMailThread(key) { openMail = key; renderMail(); }
+
+async function sendMail(to) {
+  const text = $('mailbody').value.trim();
+  const subject = $('mailsubj').value.trim();
+  if (!text) return;
+  say('Sending…');
+  try {
+    const r = await api('POST', 'email-send', {account: 'personal', to, subject, text});
+    say(r.note);
+    if (r.ok) { $('mailbody').value = ''; await refreshMail(); }
+    else alert('Not sent.\n\n' + r.note);
+  } catch (e) { say('Not sent — ' + e.message); }
 }
 
 /** One group per contact, newest activity first. */
@@ -353,6 +468,7 @@ function listRow(g) {
 }
 
 function render() {
+  if (tab === 'mail') return renderMail();
   if (tab !== 'inbox' && tab !== 'archived') return;
   const list = groups();
   const mobile = narrow.matches;
@@ -514,7 +630,7 @@ async function batch(action) {
 }
 
 function openThread(key) { openKey = key; render(); }
-function closeThread() { openKey = null; render(); }
+function closeThread() { openKey = null; openMail = null; render(); }
 function toggle(key) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); }
 function useOffice(key) { (key ? $('r-' + key) : $('reply')).value = officeText; }
 

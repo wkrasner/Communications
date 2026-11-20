@@ -22,6 +22,8 @@ Parameters:
   GoogleClientSecret: { Type: String, Default: '', NoEcho: true }
   MedtaskCommsUrl: { Type: String, Default: '' }
   MedtaskCommsSecret: { Type: String, Default: '', NoEcho: true }
+  WorkGmailUser: { Type: String, Default: '' }
+  WorkGmailAppPassword: { Type: String, Default: '', NoEcho: true }
   OpenAiApiKey: { Type: String, Default: '', NoEcho: true }
   RecordCalls: { Type: String, Default: 'off', AllowedValues: ['on', 'off'] }
 
@@ -96,6 +98,8 @@ Resources:
           GOOGLE_CLIENT_SECRET: !Ref GoogleClientSecret
           MEDTASK_COMMS_URL: !Ref MedtaskCommsUrl
           MEDTASK_COMMS_SECRET: !Ref MedtaskCommsSecret
+          WORK_GMAIL_USER: !Ref WorkGmailUser
+          WORK_GMAIL_APP_PASSWORD: !Ref WorkGmailAppPassword
           OPENAI_API_KEY: !Ref OpenAiApiKey
           RECORD_CALLS: !Ref RecordCalls
       Policies:
@@ -124,6 +128,11 @@ Resources:
           Properties:
             Schedule: 'rate(12 hours)'
             Input: '{"contacts": true}'
+        PollMail:
+          Type: Schedule
+          Properties:
+            Schedule: 'rate(5 minutes)'
+            Input: '{"mail": true}'
 
 Outputs:
   WebhookUrl:

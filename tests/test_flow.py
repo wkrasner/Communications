@@ -955,7 +955,8 @@ class ButtonIcons(Base):
         for glyph, word in [("&#9742;", "Call"), ("&#10003;", "Allow"),
                             ("&#8856;", "Block"), ("&#128465;", "Delete"),
                             ("&#9654;", "Voicemail"), ("&#10148;", "Send"),
-                            ("&#9993;", "Inbox"), ("&#9881;", "Status")]:
+                            ("&#128222;", "Comms"), ("&#9993;", "Email"),
+                            ("&#9881;", "Status")]:
             self.assertIn(f"{glyph} {word}", page, word)
 
 
@@ -1342,3 +1343,110 @@ class EmojiPad(Base):
         page = self.page()
         for e in ["👍", "❤️", "📞", "💊", "✅", "🎉"]:
             self.assertIn(e, page, e)
+
+
+class Email(Base):
+    def setUp(self):
+        super().setUp()
+        h.ADMIN_TOKEN = "secret"
+        h.GMAIL_USER, h.GMAIL_APP_PASSWORD = "me@gmail.com", "pw"
+        h.WORK_USER, h.WORK_PASSWORD = "me@anchorfhc.com", "pw2"
+        self.fetched, self.sent = {}, []
+        import sys, types
+        fake = types.ModuleType("mailbox")
+
+        def fetch(user, password, since=0, want_body=True, limit=60, lookback_days=30):
+            self.fetched[user] = want_body
+            return list(self.mail.get(user, [])), 10
+        fake.fetch = fetch
+        fake.send = lambda u, p, to, subj, text, irt="": self.sent.append((u, to, subj, text))
+        sys.modules["mailbox"] = fake
+        self.mail = {
+            "me@gmail.com": [{"uid": 1, "from_addr": "mary@x.com", "from_name": "Mary",
+                              "subject": "lunch?", "ts": "2026-11-20T10:00:00-05:00",
+                              "body": "are you free", "message_id": "<a>", "bulk": False}],
+            "me@anchorfhc.com": [{"uid": 2, "from_addr": "pt@x.com", "from_name": "Pt",
+                                  "subject": "my results", "ts": "2026-11-20T11:00:00-05:00",
+                                  "body": "", "message_id": "<b>", "bulk": False},
+                                 {"uid": 3, "from_addr": "news@x.com", "from_name": "News",
+                                  "subject": "deals", "ts": "2026-11-20T09:00:00-05:00",
+                                  "body": "", "message_id": "<c>", "bulk": True}],
+        }
+
+    def tearDown(self):
+        import sys
+        sys.modules.pop("mailbox", None)
+        h.GMAIL_USER = h.GMAIL_APP_PASSWORD = h.WORK_USER = h.WORK_PASSWORD = ""
+
+    def test_personal_is_fetched_with_bodies_and_practice_without(self):
+        h.poll_mail()
+        self.assertEqual(self.fetched["me@gmail.com"], True)
+        self.assertEqual(self.fetched["me@anchorfhc.com"], False)
+
+    def test_practice_mail_is_stored_without_a_body(self):
+        h.poll_mail()
+        work = self.db["EMAIL#practice#2"]
+        self.assertEqual(work["subject"], "my results")
+        self.assertEqual(work["body"], "")
+        self.assertTrue(work["headers_only"])
+
+    def test_personal_mail_keeps_its_body(self):
+        h.poll_mail()
+        self.assertEqual(self.db["EMAIL#personal#1"]["body"], "are you free")
+        self.assertFalse(self.db["EMAIL#personal#1"]["headers_only"])
+
+    def test_bulk_mail_is_dropped(self):
+        h.poll_mail()
+        self.assertNotIn("EMAIL#practice#3", self.db)
+
+    def test_replying_from_the_practice_account_is_refused(self):
+        ok, note = h.send_mail("practice", "pt@x.com", "Re", "hello")
+        self.assertFalse(ok)
+        self.assertIn("read-only", note)
+        self.assertEqual(self.sent, [])
+
+    def test_replying_from_personal_sends_and_is_recorded(self):
+        ok, note = h.send_mail("personal", "mary@x.com", "Re: lunch?", "yes")
+        self.assertTrue(ok, note)
+        self.assertEqual(self.sent[0][:3], ("me@gmail.com", "mary@x.com", "Re: lunch?"))
+        out = [i for i in self.db.values() if i.get("dir") == "out"][0]
+        self.assertEqual(out["to_addr"], "mary@x.com")
+
+    def test_a_broken_mailbox_does_not_stop_the_other(self):
+        import sys
+        real = sys.modules["mailbox"].fetch
+
+        def half(user, password, since=0, want_body=True, **kw):
+            if user == "me@anchorfhc.com":
+                raise OSError("login failed")
+            return real(user, password, since, want_body, **kw)
+        sys.modules["mailbox"].fetch = half
+        out = h.poll_mail()
+        self.assertIn("login failed", out["accounts"]["practice"]["error"])
+        self.assertEqual(out["accounts"]["personal"]["kept"], 1)
+
+
+class MailboxParsing(Base):
+    def msg(self, raw):
+        import email as e
+        import sys
+        sys.path.insert(0, "src")
+        import mailbox
+        return mailbox, e.message_from_string(raw)
+
+    def test_newsletters_are_recognised(self):
+        mb, m = self.msg("From: News <news@x.com>\nList-Unsubscribe: <http://x>\n\nhi")
+        self.assertTrue(mb.is_bulk(m))
+
+    def test_a_person_is_not(self):
+        mb, m = self.msg("From: Mary <mary@x.com>\nSubject: lunch\n\nhi")
+        self.assertFalse(mb.is_bulk(m))
+
+    def test_no_reply_senders_are_bulk(self):
+        mb, m = self.msg("From: no-reply@bank.com\n\nhi")
+        self.assertTrue(mb.is_bulk(m))
+
+    def test_headers_only_never_carries_the_body(self):
+        mb, m = self.msg("From: Pt <pt@x.com>\nSubject: results\n\nmy blood pressure is")
+        self.assertEqual(mb.parse(m, want_body=False)["body"], "")
+        self.assertIn("blood pressure", mb.parse(m, want_body=True)["body"])

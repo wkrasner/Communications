@@ -47,6 +47,10 @@ SMS_API_URL = os.environ.get(
 )
 OFFICE_PHONE = os.environ.get("OFFICE_PHONE", "")
 CELL_NUMBER = os.environ.get("CELL_NUMBER", "")  # the real cell, for labelling
+# Two mailboxes. The practice one is headers-only until this app's auth is
+# as strong as MedTask's — a subject line is not a chart note.
+WORK_USER = os.environ.get("WORK_GMAIL_USER", "").strip()
+WORK_PASSWORD = "".join(os.environ.get("WORK_GMAIL_APP_PASSWORD", "").split())
 MEDTASK_URL = os.environ.get("MEDTASK_COMMS_URL", "").strip()
 MEDTASK_SECRET = os.environ.get("MEDTASK_COMMS_SECRET", "").strip()
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
@@ -742,6 +746,72 @@ def run_due_contact_sync():
     return sync_contacts()
 
 
+def mail_accounts():
+    """(label, address, password, store_bodies) for each configured mailbox."""
+    out = []
+    if GMAIL_USER and GMAIL_APP_PASSWORD:
+        out.append(("personal", GMAIL_USER, GMAIL_APP_PASSWORD, True))
+    if WORK_USER and WORK_PASSWORD:
+        out.append(("practice", WORK_USER, WORK_PASSWORD, False))
+    return out
+
+
+def poll_mail():
+    """Pull new mail from each mailbox into the email store."""
+    status = {"ts": now_iso(), "accounts": {}}
+    accounts = mail_accounts()
+    if not accounts:
+        status["error"] = "no mailboxes configured"
+        db_put({"pk": "STATE#mailpoll", "sk": "META", **status})
+        return status
+    import mailbox
+    for label, user, password, bodies in accounts:
+        cursor = db_get(f"STATE#mail#{label}") or {}
+        since = int(cursor.get("uid", 0))
+        try:
+            msgs, highest = mailbox.fetch(user, password, since, want_body=bodies)
+        except Exception as e:
+            status["accounts"][label] = {"error": f"{type(e).__name__}: {e}"[:200]}
+            continue
+        kept = 0
+        for m in msgs:
+            if m["bulk"]:
+                continue        # newsletters stay in Gmail
+            ts = m["ts"] or now_iso()
+            db_put({
+                "pk": f"EMAIL#{label}#{m['uid']}", "sk": "META",
+                "gsi1pk": "EMAILS", "gsi1sk": ts, "ts": ts,
+                "account": label, "address": user,
+                "from_addr": m["from_addr"], "from_name": m["from_name"],
+                "subject": m["subject"], "body": m["body"],
+                "message_id": m["message_id"], "headers_only": not bodies,
+            })
+            kept += 1
+        if highest > since:
+            db_put({"pk": f"STATE#mail#{label}", "sk": "META", "uid": highest})
+        status["accounts"][label] = {"seen": len(msgs), "kept": kept, "uid": highest}
+    db_put({"pk": "STATE#mailpoll", "sk": "META", **status})
+    return status
+
+
+def send_mail(account, to, subject, text, in_reply_to=""):
+    """Reply from the account the message arrived on. Practice is read-only here."""
+    if account != "personal":
+        return False, "the practice mailbox is read-only here — open it in Gmail"
+    if not (GMAIL_USER and GMAIL_APP_PASSWORD):
+        return False, "no personal mailbox configured"
+    import mailbox
+    mailbox.send(GMAIL_USER, GMAIL_APP_PASSWORD, to, subject, text, in_reply_to)
+    ts = now_iso()
+    db_put({
+        "pk": f"EMAIL#sent#{ts}", "sk": "META", "gsi1pk": "EMAILS", "gsi1sk": ts,
+        "ts": ts, "account": "personal", "address": GMAIL_USER,
+        "from_addr": GMAIL_USER, "from_name": "", "dir": "out",
+        "to_addr": to, "subject": subject, "body": text[:4000],
+    })
+    return True, "Sent."
+
+
 def poll_gmail():
     """Pull new Google Voice notification emails into the message store.
 
@@ -897,6 +967,22 @@ def admin_api(method, path, query, body, event=None):
             return 502, {"ok": False, "note": f"could not place the call: {e}"}
         return 200, {"ok": True, "note": "Your phone is ringing — answer to connect."}
 
+    if path == "/admin/api/emails" and method == "GET":
+        return 200, [clean(i) for i in db_list("EMAILS", 300)]
+
+    if path == "/admin/api/email-send" and method == "POST":
+        to = (body.get("to") or "").strip()
+        if "@" not in to:
+            return 400, {"error": "need an email address"}
+        ok, note = send_mail((body.get("account") or "personal").strip(), to,
+                             (body.get("subject") or "").strip()[:300],
+                             (body.get("text") or "").strip(),
+                             (body.get("in_reply_to") or "").strip())
+        return (200 if ok else 502), {"ok": ok, "note": note}
+
+    if path == "/admin/api/mail-poll" and method == "POST":
+        return 200, poll_mail()
+
     if path == "/admin/api/medtask" and method == "POST":
         kind = (body.get("kind") or "").strip()
         ident = (body.get("id") or "").strip()
@@ -985,6 +1071,10 @@ def admin_api(method, path, query, body, event=None):
             "sync_due": int((db_get("STATE#gsyncdue") or {}).get("due", 0)),
             "has_google_client": bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET),
             "medtask_ready": bool(MEDTASK_URL and MEDTASK_SECRET),
+            "mailboxes": [{"label": l, "address": a, "bodies": b}
+                          for l, a, _, b in mail_accounts()],
+            "mail": clean(db_get("STATE#mailpoll") or {}) or
+                    {"note": "no mail poll has run yet"},
         }
     if path == "/admin/api/poll" and method == "POST":
         # Re-reads the whole mailbox; messages keep their ids, so a reparse
@@ -1053,6 +1143,8 @@ def on_gateway_post(body):
 
 def lambda_handler(event, context):
     # Background invocations rather than HTTP requests.
+    if event.get("mail"):
+        return poll_mail()
     if event.get("poll"):
         out = poll_gmail()
         due = run_due_contact_sync()
