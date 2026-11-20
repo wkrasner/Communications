@@ -1216,9 +1216,10 @@ class NameResolution(Base):
         self.assertIn("api('GET', 'numbers')", page.split("async function refresh")[1][:600])
         self.assertIn("g.name = names[key] || g.name", page)
 
-    def test_contacts_search_drops_the_country_code(self):
+    def test_contacts_search_uses_the_format_google_stores(self):
         fn = self.page().split("function contactsLink")[1].split("async function")[0]
-        self.assertIn(r"^\+1(\d{10})$", fn)
+        self.assertIn(r"^\+1(\d{3})(\d{3})(\d{4})$", fn)
+        self.assertIn("`(${m[1]})${m[2]}-${m[3]}`", fn)
 
     def test_numbers_api_returns_what_the_lookup_needs(self):
         h.ADMIN_TOKEN = "secret"

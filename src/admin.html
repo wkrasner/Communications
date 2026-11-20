@@ -630,9 +630,10 @@ async function setTaskList(id) {
 function contactsLink(g) {
   let term = g.name;
   if (!term) {
-    // "+16095550123" finds nothing; "6095550123" matches how Google stores it.
-    const m = /^\+1(\d{10})$/.exec(g.key);
-    term = m ? m[1] : g.key.replace(/^\+/, '');
+    // Google stores US numbers as (609)555-0123, and searches the stored
+    // string — "+16095550123" matches nothing.
+    const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(g.key);
+    term = m ? `(${m[1]})${m[2]}-${m[3]}` : g.key.replace(/^\+/, '');
   }
   return 'https://contacts.google.com/search/' + encodeURIComponent(term);
 }
