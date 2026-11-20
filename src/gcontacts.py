@@ -18,7 +18,8 @@ OTHER_URL = "https://people.googleapis.com/v1/otherContacts"
 # Saved contacts and the ones Google collected from mail are separate
 # collections behind separate scopes.
 SCOPE = ("https://www.googleapis.com/auth/contacts.readonly "
-         "https://www.googleapis.com/auth/contacts.other.readonly")
+         "https://www.googleapis.com/auth/contacts.other.readonly "
+         "https://www.googleapis.com/auth/tasks")
 
 
 def _post(url, data):
@@ -129,3 +130,29 @@ def other_contacts(token, page_limit=20):
         if not page:
             break
     return out
+
+
+TASKS_LISTS_URL = "https://tasks.googleapis.com/tasks/v1/users/@me/lists"
+TASKS_URL = "https://tasks.googleapis.com/tasks/v1/lists/{list_id}/tasks"
+
+
+def task_lists(token):
+    """The task lists on the account, as (id, title) pairs."""
+    body = _get(TASKS_LISTS_URL + "?maxResults=100", token)
+    return [(it["id"], it.get("title", "")) for it in body.get("items", [])]
+
+
+def create_task(token, list_id, title, notes=""):
+    """Add a task; it appears on anything reading the same Google Tasks list."""
+    req = urllib.request.Request(
+        TASKS_URL.format(list_id=urllib.parse.quote(list_id)),
+        data=json.dumps({"title": title[:1024], "notes": notes[:8192]}).encode(),
+        method="POST",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read()[:400].decode("utf-8", "replace")
+        raise RuntimeError(f"Tasks API {e.code}: {detail}")

@@ -627,6 +627,34 @@ def sync_contacts():
     return status
 
 
+def google_token():
+    """A fresh access token, or None if Google was never connected."""
+    row = db_get("STATE#gtoken") or {}
+    if not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and row.get("refresh_token")):
+        return None
+    import gcontacts
+    return gcontacts.access_token(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+                                  row["refresh_token"])
+
+
+def make_task(contact, text, name=""):
+    """Put a task on the Google Tasks list the kanban board reads."""
+    token = google_token()
+    if not token:
+        return False, "not connected to Google"
+    import gcontacts
+    chosen = (db_get("SETTING#tasklist") or {}).get("id", "")
+    if not chosen:
+        lists = gcontacts.task_lists(token)
+        if not lists:
+            return False, "no task lists on the Google account"
+        chosen = lists[0][0]
+    who = name or contact
+    notes = f"From {who} ({contact})\n\n{text}".strip()
+    gcontacts.create_task(token, chosen, f"Call back {who}", notes)
+    return True, "Task created."
+
+
 def poll_gmail():
     """Pull new Google Voice notification emails into the message store.
 
@@ -780,7 +808,32 @@ def admin_api(method, path, query, body, event=None):
             return 502, {"ok": False, "note": f"could not place the call: {e}"}
         return 200, {"ok": True, "note": "Your phone is ringing — answer to connect."}
 
+    if path == "/admin/api/task" and method == "POST":
+        contact = normalize(body.get("contact") or "") or (body.get("contact") or "").strip()
+        text = (body.get("text") or "").strip()
+        if not contact:
+            return 400, {"error": "need a contact"}
+        try:
+            ok, note = make_task(contact, text, (body.get("name") or "").strip())
+        except Exception as e:
+            return 502, {"ok": False, "note": f"{type(e).__name__}: {e}"[:300]}
+        return (200 if ok else 502), {"ok": ok, "note": note}
+
+    if path == "/admin/api/task-lists" and method == "GET":
+        token = google_token()
+        if not token:
+            return 400, {"error": "not connected to Google"}
+        import gcontacts
+        chosen = (db_get("SETTING#tasklist") or {}).get("id", "")
+        return 200, {"lists": [{"id": i, "title": t}
+                               for i, t in gcontacts.task_lists(token)],
+                     "chosen": chosen}
+
     if path == "/admin/api/settings" and method == "POST":
+        if "tasklist" in body:
+            db_put({"pk": "SETTING#tasklist", "sk": "META",
+                    "id": str(body["tasklist"])})
+            return 200, {"tasklist": str(body["tasklist"])}
         if "record" not in body:
             return 400, {"error": "nothing to set"}
         on = bool(body["record"])

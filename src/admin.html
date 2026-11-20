@@ -352,6 +352,7 @@ function render() {
           <button class="small" onclick="thread('${esc(g.key)}','${tab === 'archived' ? 'unarchive' : 'archive'}')">${tab === 'archived' ? '&#128229; Unarchive' : '&#128230; Archive'}</button>
           <button class="small" onclick="thread('${esc(g.key)}','delete')">&#128465; Delete</button>
           ${g.key.startsWith('+') && g.flagged && officeText ? `<button class="small" onclick="useOffice()">&#127973; Office referral</button>` : ''}
+          <button class="small" onclick="makeTask('${esc(g.key)}')">&#128203; Make task</button>
         </div>
         <div class="pane">
           <h3 onclick="section('texts')" style="cursor:pointer">
@@ -411,7 +412,9 @@ function render() {
               <button class="primary small" onclick="sendText('${esc(g.key)}')">&#10148; Send</button>
             </div>
             ${g.flagged && officeText ? `<button class="small" style="margin:0 0 10px"
-                onclick="useOffice('${esc(g.key)}')">&#127973; Use office referral</button>` : ''}` : ''}
+                onclick="useOffice('${esc(g.key)}')">&#127973; Use office referral</button>` : ''}
+            <button class="small" style="margin:0 0 10px"
+                onclick="makeTask('${esc(g.key)}')">&#128203; Make task</button>` : ''}
           ${textsHtml(g)}
         </div>
       </div>` : ''}
@@ -580,6 +583,39 @@ async function showStatus() {
        <button class="small" style="margin-top:7px" onclick="reparse()">&#8635; Re-import</button>
      </div>`,
   ].join('') + '</div>';
+  loadTaskLists();
+}
+
+async function loadTaskLists() {
+  const box = document.getElementById('tasklists');
+  if (!box) return;
+  try {
+    const r = await api('GET', 'task-lists');
+    if (r.error) { box.textContent = r.error; return; }
+    box.innerHTML = r.lists.map(l => `
+      <label style="display:flex;gap:7px;align-items:center;padding:3px 0">
+        <input type="radio" name="tl" value="${esc(l.id)}" style="width:auto"
+               ${l.id === r.chosen || (!r.chosen && l === r.lists[0]) ? 'checked' : ''}
+               onchange="setTaskList('${esc(l.id)}')">
+        <span>${esc(l.title)}</span>
+      </label>`).join('') || 'No task lists on the account.';
+  } catch (e) { box.textContent = 'Could not read task lists — ' + e.message; }
+}
+async function setTaskList(id) {
+  await api('POST', 'settings', {tasklist: id});
+  say('Tasks will go to that list.');
+}
+
+async function makeTask(key) {
+  const g = groups().find(x => x.key === key);
+  const latest = g && g.msgs.find(m => m.dir !== 'out');
+  say('Creating task…');
+  try {
+    const r = await api('POST', 'task', {
+      contact: key, name: (g && g.name) || '',
+      text: latest ? latest.text : ''});
+    say(r.ok ? r.note : 'Not created — ' + r.note);
+  } catch (e) { say('Not created — ' + e.message); }
 }
 
 async function callOut(to) {

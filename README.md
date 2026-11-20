@@ -43,6 +43,8 @@ Before turning call recording on: New Jersey is a one-party-consent state, but s
 
 **Click to call** rings your own handset first and bridges you to the other party when you answer. That is deliberate rather than a browser softphone: on Android, a web page cannot switch between earpiece and speaker (`setSinkId` is not supported there), so routing the call to the SIP app keeps mute, speaker and Bluetooth native. It needs `VOICE_APP_ID`, the Voice API application's id.
 
+**Make task** puts a Google Task on whichever list you pick on the Status screen — the same lists the Google Tasks kanban board reads, so a task filed here appears there with nothing in between. The task is titled for the caller and carries their latest message in the notes. It is a button, not automatic: keyword matching flags more than it should, and a board filling itself with false positives is worse than none.
+
 Not built yet: the AI screener, scheduled/queued texts.
 
 ## Setup

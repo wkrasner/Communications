@@ -992,3 +992,63 @@ class ComposerPosition(Base):
     def test_desktop_reply_box_comes_before_the_messages(self):
         pane = self.page().split('<div class="pane"><h3>Texts</h3>')[1]
         self.assertLess(pane.index('class="reply"'), pane.index("textsHtml(g)"))
+
+
+class Tasks(Base):
+    def setUp(self):
+        super().setUp()
+        h.ADMIN_TOKEN = "secret"
+        h.GOOGLE_CLIENT_ID, h.GOOGLE_CLIENT_SECRET = "cid", "csec"
+        self.db["STATE#gtoken"] = {"pk": "STATE#gtoken", "refresh_token": "RT"}
+        self.created = []
+        import sys, types
+        fake = types.ModuleType("gcontacts")
+        fake.access_token = lambda *a: "AT"
+        fake.task_lists = lambda token: self.lists
+        fake.create_task = lambda token, lid, title, notes="": \
+            self.created.append((lid, title, notes))
+        self.lists = [("L1", "My Tasks"), ("L2", "Callbacks")]
+        sys.modules["gcontacts"] = fake
+
+    def tearDown(self):
+        import sys
+        sys.modules.pop("gcontacts", None)
+        h.GOOGLE_CLIENT_ID = h.GOOGLE_CLIENT_SECRET = ""
+
+    def post(self, path, payload):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "POST"}},
+                              "rawPath": path,
+                              "headers": {"x-admin-token": "secret"},
+                              "queryStringParameters": None,
+                              "body": json.dumps(payload)}, None)
+        return r["statusCode"], json.loads(r["body"])
+
+    def test_task_lands_on_the_first_list_by_default(self):
+        code, out = self.post("/admin/api/task",
+                              {"contact": "+12155551234", "name": "Mom",
+                               "text": "my chest hurts"})
+        self.assertEqual((code, out["ok"]), (200, True))
+        lid, title, notes = self.created[0]
+        self.assertEqual(lid, "L1")
+        self.assertEqual(title, "Call back Mom")
+        self.assertIn("my chest hurts", notes)
+        self.assertIn("+12155551234", notes)
+
+    def test_chosen_list_is_used(self):
+        self.post("/admin/api/settings", {"tasklist": "L2"})
+        self.post("/admin/api/task", {"contact": "+12155551234", "text": "hi"})
+        self.assertEqual(self.created[0][0], "L2")
+
+    def test_contact_is_required(self):
+        self.assertEqual(self.post("/admin/api/task", {"text": "hi"})[0], 400)
+
+    def test_without_google_it_says_so(self):
+        del self.db["STATE#gtoken"]
+        code, out = self.post("/admin/api/task", {"contact": "+12155551234"})
+        self.assertEqual(code, 502)
+        self.assertIn("not connected", out["note"])
+
+    def test_short_code_thread_can_make_a_task(self):
+        code, out = self.post("/admin/api/task", {"contact": "22000", "text": "code"})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.created[0][1], "Call back 22000")
