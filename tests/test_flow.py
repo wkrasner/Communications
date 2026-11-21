@@ -1880,6 +1880,43 @@ class BrowserCallingPanel(Base):
         self.assertIn('id="callbar"', page)
 
 
+class DialPad(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_the_pad_has_every_key_a_phone_has(self):
+        page = self.page()
+        for k in list("0123456789") + ["#"]:
+            self.assertIn(f"padKey('{k}')", page, k)
+        self.assertIn("padKey('*')", page)
+        self.assertIn("&lowast;", page)        # star, rendered as a glyph
+
+    def test_keys_type_into_the_number_field_and_can_be_undone(self):
+        page = self.page()
+        self.assertIn("function padBack()", page)
+        self.assertIn("function padClear()", page)
+        self.assertIn("box.value += k", page)
+
+    def test_the_pad_steps_aside_when_a_name_is_being_typed(self):
+        self.assertIn("$('dialpad').hidden = /[a-z]/i.test(raw)", self.page())
+
+    def test_during_a_call_the_keys_send_tones(self):
+        page = self.page()
+        self.assertIn("rtcCall.dtmf(k)", page)
+        self.assertIn("function toneKeys()", page)
+        self.assertIn("No call is up.", page)
+
+    def test_the_tone_pad_closes_with_the_call(self):
+        page = self.page()
+        # Both the explicit hang-up and the hangup notification must clear it.
+        self.assertEqual(page.count("$('tones').hidden = true"), 3)
+
+    def test_keys_are_big_enough_to_hit(self):
+        self.assertIn("min-height: 56px", self.page())
+
+
 class MailboxParsing(Base):
     def msg(self, raw):
         import email as e
