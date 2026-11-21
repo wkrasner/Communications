@@ -151,6 +151,73 @@ def read_audio(key):
     return s3().get_object(Bucket=BUCKET, Key=key)["Body"].read()
 
 
+MEDIA_MAX = 5_000_000        # one attachment; carriers cap MMS far below this
+MEDIA_PER_MESSAGE = 10
+_EXT = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+        "image/gif": "gif", "image/webp": "webp", "image/heic": "heic",
+        "video/mp4": "mp4", "video/3gpp": "3gp", "audio/mpeg": "mp3",
+        "audio/amr": "amr", "application/pdf": "pdf", "text/vcard": "vcf",
+        "text/x-vcard": "vcf"}
+
+
+def media_key(ident, n, content_type, name=""):
+    """A bucket key that is safe whatever the sender called the file."""
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    ext = _EXT.get(ctype, "")
+    if not ext:
+        ext = re.sub(r"[^a-z0-9]", "", os.path.splitext(name or "")[1].lower())[:5]
+    safe = re.sub(r"[^\w-]", "", str(ident))[-40:] or "msg"
+    return f"media/{safe}-{n}.{ext or 'bin'}"
+
+
+def put_media(data, key, content_type):
+    s3().put_object(Bucket=BUCKET, Key=key, Body=data,
+                    ContentType=content_type or "application/octet-stream")
+
+
+def fetch_media(url, key, content_type=""):
+    """Copy an attachment into our own bucket, since Telnyx URLs expire."""
+    req = urllib.request.Request(url, headers={"User-Agent": "communications"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        data = r.read(MEDIA_MAX + 1)
+        content_type = content_type or r.headers.get("Content-Type", "")
+    if len(data) > MEDIA_MAX:
+        raise ValueError(f"attachment over {MEDIA_MAX} bytes")
+    put_media(data, key, content_type)
+    return content_type
+
+
+def media_url(key, expires=3600):
+    return s3().generate_presigned_url(
+        "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=expires
+    )
+
+
+def store_files(ident, items):
+    """Save a message's attachments; returns what the panel needs to show them.
+
+    One attachment that will not download is not worth losing the message
+    over, so a failure is logged and the rest still land.
+    """
+    out = []
+    for n, it in enumerate((items or [])[:MEDIA_PER_MESSAGE]):
+        ctype = it.get("content_type") or it.get("type") or ""
+        name = it.get("name") or ""
+        key = media_key(ident, n, ctype, name)
+        try:
+            if it.get("data") is not None:
+                put_media(it["data"], key, ctype)
+            elif it.get("url"):
+                ctype = fetch_media(it["url"], key, ctype) or ctype
+            else:
+                continue
+        except Exception as e:
+            print(f"attachment {n} of {ident} not saved: {type(e).__name__}: {e}")
+            continue
+        out.append({"key": key, "type": ctype, "name": name})
+    return out
+
+
 def transcribe(audio, filename="audio.mp3"):
     """Whisper transcript of recorded audio. Returns '' rather than raising."""
     if not OPENAI_KEY:
@@ -511,7 +578,7 @@ def office_reply():
 
 
 def store_message(ident, caller, did, line, text, direction="in", src="telnyx",
-                  relay="", name="", media=0):
+                  relay="", name="", media=0, files=None):
     """One text, inbound or outbound, in the thread for `caller`."""
     caller = normalize(caller) or caller or "unknown"
     entry = db_get(f"NUM#{caller}") if caller.startswith("+") else None
@@ -520,8 +587,11 @@ def store_message(ident, caller, did, line, text, direction="in", src="telnyx",
         "pk": f"MSG#{ident}", "sk": "META", "gsi1pk": "MSGS", "gsi1sk": ts,
         "ts": ts, "contact": caller, "from": caller,
         "name": (entry or {}).get("name") or name, "line": line, "did": did,
-        "dir": direction, "src": src, "text": (text or "")[:1500], "media": media,
+        "dir": direction, "src": src, "text": (text or "")[:1500],
+        "media": media or len(files or []),
     }
+    if files:
+        item["files"] = files
     if relay:
         item["relay"] = relay
     if direction == "in" and text and MEDICAL.search(text):
@@ -540,17 +610,66 @@ def latest_thread_route(contact):
     return ("cell", "")
 
 
-def send_text(contact, text, via=""):
+def thread_did(contact):
+    """The DID an inbound Telnyx text arrived on, so a reply goes back out it."""
+    msgs = [m for m in db_list("MSGS", 400) if m.get("contact") == contact]
+    msgs.sort(key=lambda m: m.get("ts", ""), reverse=True)
+    for m in msgs:
+        if m.get("src") == "telnyx" and m.get("did"):
+            return m["did"]
+    return next((d for d in LINES if d), "")
+
+
+def telnyx_message(frm, to, text, media_urls=()):
+    """Send SMS, or MMS when media_urls is given, from one of our own DIDs."""
+    payload = {"from": frm, "to": to}
+    if text:
+        payload["text"] = text
+    if media_urls:
+        payload["media_urls"] = list(media_urls)
+    req = urllib.request.Request(
+        f"{TELNYX_API}/messages", data=json.dumps(payload).encode(), method="POST",
+        headers={"Authorization": f"Bearer {API_KEY}",
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        r.read()
+    return True
+
+
+def send_text(contact, text, via="", files=None):
     """Send as whichever line the thread belongs to, or the one asked for.
 
     A brand new conversation can only go out from the cell: Google Voice's
     email relay is a reply address that exists only once they have texted.
     """
     src, relay = latest_thread_route(contact)
-    if via in ("cell", "gv"):
+    if via in ("cell", "gv", "telnyx"):
         src = via
-        if via == "cell":
+        if via != "gv":
             relay = ""
+    if src == "telnyx":
+        if not API_KEY:
+            return False, "no Telnyx API key configured"
+        did = thread_did(contact)
+        if not did:
+            return False, "no Telnyx number to send from"
+        ident = f"out-{now_iso()}"
+        saved = store_files(ident, files or [])
+        try:
+            telnyx_message(did, contact, text,
+                           [media_url(f["key"]) for f in saved])
+        except urllib.error.HTTPError as e:
+            return False, (f"Telnyx {e.code}: "
+                           f"{e.read()[:200].decode('utf-8', 'replace')}")
+        except Exception as e:
+            return False, f"Telnyx error: {e}"
+        store_message(ident, contact, did, LINES.get(did, "Other"), text,
+                      direction="out", src="telnyx", files=saved)
+        return True, "sent from " + (LINES.get(did) or did)
+    if files:
+        where = ("Google Voice replies go out as plain text"
+                 if src == "gv" else "your cell's SMS gateway sends text only")
+        return False, f"{where} — a picture can only go out on the Telnyx line"
     if src == "gv":
         if not (GMAIL_USER and GMAIL_APP_PASSWORD and relay):
             return False, "no Gmail credentials or no relay address for this thread"
@@ -838,8 +957,11 @@ def poll_gmail():
         db_put({"pk": "STATE#gvpoll", "sk": "META", **status})
         return status
     for m in msgs:
-        store_message(f"gv-{m['uid']}", m["from"], os.environ.get("GV_DID", ""),
-                      "GV", m["text"], src="gv", relay=m["relay"], name=m["name"])
+        ident = f"gv-{m['uid']}"
+        files = store_files(ident, m.get("files") or [])
+        store_message(ident, m["from"], os.environ.get("GV_DID", ""),
+                      "GV", m["text"], src="gv", relay=m["relay"], name=m["name"],
+                      files=files)
     status.update(polled=len(msgs), uid=highest, since=since, user=GMAIL_USER)
     if highest > since:
         db_put({"pk": "STATE#gvuid", "sk": "META", "uid": highest})
@@ -852,9 +974,15 @@ def on_message_received(p):
     frm = p.get("from") or {}
     dids = [t.get("phone_number", "") for t in (p.get("to") or [])]
     did = next((d for d in dids if d in LINES), dids[0] if dids else "")
-    store_message(p.get("id", now_iso()), frm.get("phone_number", ""), did,
+    ident = p.get("id", now_iso())
+    media = p.get("media") or []
+    files = store_files(ident, [
+        {"url": m.get("url"), "content_type": m.get("content_type")}
+        for m in media if isinstance(m, dict) and m.get("url")
+    ])
+    store_message(ident, frm.get("phone_number", ""), did,
                   LINES.get(did, "Other"), p.get("text", ""), src="telnyx",
-                  media=len(p.get("media") or []))
+                  media=len(media), files=files)
 
 
 def handle_webhook(body):
@@ -895,9 +1023,21 @@ def admin_api(method, path, query, body, event=None):
     if path == "/admin/api/send" and method == "POST":
         to = normalize(body.get("to"))
         text = (body.get("text") or "").strip()
-        if not to or not text:
+        files = []
+        for f in (body.get("files") or [])[:MEDIA_PER_MESSAGE]:
+            try:
+                data = base64.b64decode((f.get("data") or "").split(",")[-1])
+            except Exception:
+                return 400, {"error": "that attachment could not be read"}
+            if not data:
+                continue
+            if len(data) > MEDIA_MAX:
+                return 400, {"error": "that attachment is too big to send"}
+            files.append({"data": data, "content_type": f.get("type") or "",
+                          "name": f.get("name") or ""})
+        if not to or not (text or files):
             return 400, {"error": "need a number and some text"}
-        ok, note = send_text(to, text, (body.get("via") or "").strip())
+        ok, note = send_text(to, text, (body.get("via") or "").strip(), files)
         return (200 if ok else 502), {"ok": ok, "note": note}
     if path == "/admin/api/office-reply" and method == "GET":
         return 200, {"text": office_reply()}
@@ -1112,6 +1252,11 @@ def admin_api(method, path, query, body, event=None):
             return 400, {"error": "bad number"}
         db_delete(f"NUM#{num}")
         return 200, {"deleted": num}
+    if path == "/admin/api/media" and method == "GET":
+        key = query.get("key", "")
+        if not re.fullmatch(r"media/[\w.-]{1,80}", key):
+            return 400, {"error": "bad key"}
+        return 200, {"url": media_url(key)}
     if path == "/admin/api/voicemail" and method == "GET":
         key = query.get("key", "")
         if not re.fullmatch(r"voicemail/[\w-]+\.mp3", key):
@@ -1140,9 +1285,24 @@ def on_gateway_post(body):
     p = body.get("payload") or body
     sender = p.get("sender") or p.get("phoneNumber") or ""
     text = p.get("message", "")
-    media = len(p.get("attachments") or p.get("media") or [])
-    store_message(body.get("id") or p.get("messageId") or now_iso(),
-                  sender, CELL_NUMBER, "Cell", text, src="cell", media=media)
+    raw = p.get("attachments") or p.get("media") or []
+    items = []
+    for a in raw:
+        if isinstance(a, str) and a.startswith("http"):
+            items.append({"url": a})
+        elif isinstance(a, dict):
+            url = a.get("url") or a.get("uri") or ""
+            if url:
+                items.append({
+                    "url": url,
+                    "content_type": (a.get("contentType") or a.get("content_type")
+                                     or a.get("type") or ""),
+                    "name": a.get("name") or a.get("filename") or "",
+                })
+    ident = body.get("id") or p.get("messageId") or now_iso()
+    files = store_files(ident, items)
+    store_message(ident, sender, CELL_NUMBER, "Cell", text, src="cell",
+                  media=len(raw), files=files)
 
 
 def lambda_handler(event, context):

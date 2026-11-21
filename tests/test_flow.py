@@ -1436,6 +1436,216 @@ class Email(Base):
         self.assertEqual(out["accounts"]["personal"]["kept"], 1)
 
 
+class _Resp(io.BytesIO):
+    """Just enough of an HTTP response for fetch_media."""
+
+    def __init__(self, data, ctype):
+        super().__init__(data)
+        self.headers = {"Content-Type": ctype}
+
+
+class Attachments(Base):
+    def setUp(self):
+        super().setUp()
+        self.objects, self.posts = {}, []
+        h.put_media = lambda data, key, ctype: self.objects.__setitem__(key, (data, ctype))
+        h.media_url = lambda key, expires=3600: f"https://signed.example/{key}"
+        self.real = h.urllib.request.urlopen
+        self.body = b"\xff\xd8JPEGBYTES"
+
+        def fake(req, timeout=0):
+            url = req if isinstance(req, str) else req.full_url
+            if "api.telnyx.com" in url:
+                self.posts.append(json.loads(req.data))
+                return _Resp(b"{}", "application/json")
+            return _Resp(self.body, "image/jpeg")
+
+        h.urllib.request.urlopen = fake
+        self.addCleanup(lambda: setattr(h.urllib.request, "urlopen", self.real))
+
+    def msg(self):
+        return [i for i in self.db.values() if i.get("gsi1pk") == "MSGS"][0]
+
+    def mms(self, media):
+        h.handle_webhook({"data": {"event_type": "message.received", "id": "e1",
+                                   "payload": {"id": "m1", "text": "look",
+                                               "from": {"phone_number": "+12155551234"},
+                                               "to": [{"phone_number": "+16095550001"}],
+                                               "media": media}}})
+
+    def test_inbound_mms_is_copied_into_our_own_bucket(self):
+        self.mms([{"url": "https://media.telnyx.com/x", "content_type": "image/jpeg"}])
+        m = self.msg()
+        self.assertEqual(len(m["files"]), 1)
+        key = m["files"][0]["key"]
+        self.assertTrue(key.startswith("media/"), key)
+        self.assertTrue(key.endswith(".jpg"), key)
+        self.assertEqual(self.objects[key], (self.body, "image/jpeg"))
+        # Telnyx media URLs expire, so nothing may depend on them later.
+        self.assertNotIn("media.telnyx.com", json.dumps(m))
+
+    def test_an_attachment_that_will_not_save_does_not_lose_the_text(self):
+        def boom(req, timeout=0):
+            raise OSError("gone")
+        h.urllib.request.urlopen = boom
+        self.mms([{"url": "https://media.telnyx.com/x", "content_type": "image/jpeg"}])
+        m = self.msg()
+        self.assertEqual(m["text"], "look")
+        self.assertEqual(m.get("files", []), [])
+        self.assertEqual(m["media"], 1)        # the panel shows one is missing
+
+    def test_oversize_attachment_is_refused(self):
+        self.body = b"x" * (h.MEDIA_MAX + 1)
+        self.mms([{"url": "https://media.telnyx.com/big", "content_type": "image/jpeg"}])
+        self.assertEqual(self.msg().get("files", []), [])
+        self.assertEqual(self.objects, {})
+
+    def test_unknown_content_type_still_gets_a_key(self):
+        self.mms([{"url": "https://media.telnyx.com/x", "content_type": "application/zip"}])
+        self.assertTrue(self.msg()["files"][0]["key"].endswith(".bin"))
+
+    def test_gateway_attachment_urls_are_stored(self):
+        h.on_gateway_post({"id": "g1", "payload": {
+            "phoneNumber": "+12155551234", "message": "pic",
+            "attachments": [{"url": "https://gw.local/1", "contentType": "image/png",
+                             "name": "shot.png"}]}})
+        f = self.msg()["files"][0]
+        self.assertEqual(f["name"], "shot.png")
+        self.assertIn(f["key"], self.objects)
+
+    def test_google_voice_image_attachment_is_parsed_and_stored(self):
+        import email.message
+        import types
+        note = email.message.EmailMessage()
+        note["From"] = "Mary (SMS) <+12155551234.ab@txt.voice.google.com>"
+        note["Reply-To"] = "abc@txt.voice.google.com"
+        note["Subject"] = "New text message from +1 215 555 1234"
+        note["Message-ID"] = "<x@mail>"
+        note.set_content("look at this")
+        note.add_attachment(b"PNGBYTES", maintype="image", subtype="png",
+                            filename="pic.png")
+        import gvmail
+        parsed = gvmail.parse(note)
+        self.assertEqual(len(parsed["files"]), 1)
+        self.assertEqual(parsed["text"], "look at this")
+
+        h.GMAIL_USER, h.GMAIL_APP_PASSWORD = "me@gmail.com", "pw"
+        fake = types.ModuleType("gvmail")
+        parsed["uid"] = 7
+        fake.fetch = lambda u, p, since=0: ([parsed], 7)
+        sys.modules["gvmail"] = fake
+        try:
+            h.poll_gmail()
+        finally:
+            sys.modules["gvmail"] = gvmail
+        m = self.msg()
+        self.assertEqual(self.objects[m["files"][0]["key"]], (b"PNGBYTES", "image/png"))
+
+    def test_picture_goes_out_as_mms_on_the_telnyx_line(self):
+        h.API_KEY = "KEY"
+        h.store_message("in-1", "+12155551234", "+16095550001", "Cell", "hi",
+                        src="telnyx")
+        ok, note = h.send_text("+12155551234", "here you go", files=[
+            {"data": b"PNGBYTES", "content_type": "image/png", "name": "pic.png"}])
+        self.assertTrue(ok, note)
+        body = self.posts[0]
+        self.assertEqual((body["from"], body["to"]), ("+16095550001", "+12155551234"))
+        self.assertEqual(body["text"], "here you go")
+        self.assertEqual(len(body["media_urls"]), 1)
+        self.assertTrue(body["media_urls"][0].startswith("https://signed.example/media/"))
+        out = [i for i in self.db.values() if i.get("dir") == "out"][0]
+        self.assertEqual(out["files"][0]["type"], "image/png")
+
+    def test_picture_on_a_google_voice_thread_is_refused_clearly(self):
+        h.store_message("gv-1", "+12155551234", "", "GV", "hi", src="gv",
+                        relay="abc@txt.voice.google.com")
+        ok, note = h.send_text("+12155551234", "see this",
+                               files=[{"data": b"x", "content_type": "image/png"}])
+        self.assertFalse(ok)
+        self.assertIn("Telnyx line", note)
+
+    def test_picture_on_a_cell_thread_is_refused_clearly(self):
+        h.GATEWAY_USER = h.GATEWAY_PASS = "x"
+        h.store_message("c-1", "+12155551234", "", "Cell", "hi", src="cell")
+        ok, note = h.send_text("+12155551234", "see this",
+                               files=[{"data": b"x", "content_type": "image/png"}])
+        self.assertFalse(ok)
+        self.assertIn("text only", note)
+        self.assertEqual(self.posts, [])
+
+    def test_text_only_send_still_works_untouched(self):
+        h.GATEWAY_USER = h.GATEWAY_PASS = "x"
+        h.store_message("c-1", "+12155551234", "", "Cell", "hi", src="cell")
+        ok, note = h.send_text("+12155551234", "plain")
+        self.assertTrue(ok, note)
+
+
+class AttachmentApi(Base):
+    def call(self, method, path, body=None, query=None):
+        return h.lambda_handler({
+            "requestContext": {"http": {"method": method}}, "rawPath": path,
+            "headers": {"x-admin-token": "secret"},
+            "queryStringParameters": query,
+            "body": json.dumps(body) if body else "",
+        }, None)
+
+    def test_media_endpoint_signs_a_known_key(self):
+        h.media_url = lambda key, expires=3600: f"https://signed.example/{key}"
+        r = self.call("GET", "/admin/api/media", query={"key": "media/m1-0.jpg"})
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(json.loads(r["body"])["url"],
+                         "https://signed.example/media/m1-0.jpg")
+
+    def test_media_endpoint_refuses_a_path_outside_media(self):
+        for key in ("../template.yaml", "voicemail/x.mp3", "media/../secrets"):
+            r = self.call("GET", "/admin/api/media", query={"key": key})
+            self.assertEqual(r["statusCode"], 400, key)
+
+    def test_send_rejects_an_attachment_that_is_too_big(self):
+        import base64
+        payload = base64.b64encode(b"x" * (h.MEDIA_MAX + 1)).decode()
+        r = self.call("POST", "/admin/api/send", {
+            "to": "+12155551234", "text": "hi",
+            "files": [{"name": "big.jpg", "type": "image/jpeg", "data": payload}]})
+        self.assertEqual(r["statusCode"], 400)
+        self.assertIn("too big", json.loads(r["body"])["error"])
+
+    def test_send_accepts_an_attachment_with_no_text(self):
+        seen = {}
+        real = h.send_text
+        self.addCleanup(lambda: setattr(h, "send_text", real))
+        h.send_text = lambda to, text, via="", files=None: (
+            seen.update(to=to, text=text, files=files), (True, "sent"))[1]
+        r = self.call("POST", "/admin/api/send", {
+            "to": "+12155551234", "files": [
+                {"name": "p.png", "type": "image/png", "data": "UE5HQllURVM="}]})
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(seen["files"][0]["data"], b"PNGBYTES")
+        self.assertEqual(seen["text"], "")
+
+
+class AttachmentPanel(Base):
+    def page(self):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                              "rawPath": "/admin", "headers": {}, "body": ""}, None)
+        return r["body"]
+
+    def test_composer_offers_an_attach_control_and_renders_files(self):
+        page = self.page()
+        self.assertIn("pickAttach()", page)
+        self.assertIn("filesHtml(m)", page)
+        self.assertIn("api/media", page.replace("'media?key='", "api/media"))
+
+    def test_images_are_resolved_through_the_signed_url_endpoint(self):
+        page = self.page()
+        self.assertIn("loadShots", page)
+        self.assertIn("mediaUrls[key]", page)
+
+    def test_attachments_are_not_pinned_to_pixels_for_width(self):
+        # A sizeable font must not be squeezed by a fixed-width picture column.
+        self.assertIn("max-width: min(260px, 70vw)", self.page())
+
+
 class MailboxParsing(Base):
     def msg(self, raw):
         import email as e

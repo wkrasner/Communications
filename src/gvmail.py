@@ -71,6 +71,27 @@ def _sender_name(msg):
     return "" if _PHONE.fullmatch(name.strip()) else name[:80]
 
 
+def _files(msg):
+    """Picture or other attachments Google put on the notification email."""
+    out = []
+    if not msg.is_multipart():
+        return out
+    for part in msg.walk():
+        if part.get_content_maintype() == "multipart":
+            continue
+        ctype = part.get_content_type()
+        disposition = str(part.get("Content-Disposition", ""))
+        # The message text itself is not an attachment; anything else is.
+        if ctype in ("text/plain", "text/html") and "attachment" not in disposition:
+            continue
+        data = part.get_payload(decode=True) or b""
+        if not data:
+            continue
+        out.append({"data": data, "content_type": ctype,
+                    "name": _decode(part.get_filename())})
+    return out
+
+
 def parse(msg):
     """A Google Voice notification email as a text message, or None."""
     reply_to = _decode(msg.get("Reply-To")) or _decode(msg.get("From"))
@@ -90,6 +111,7 @@ def parse(msg):
         "from": _sender_number(msg, body),
         "name": _sender_name(msg),
         "text": text[:1500],
+        "files": _files(msg),
         "raw": body[:1500],  # kept so a mis-parse can be seen and fixed
         "date": _decode(msg.get("Date")),
         "message_id": _decode(msg.get("Message-ID")),

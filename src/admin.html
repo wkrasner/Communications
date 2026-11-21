@@ -93,6 +93,18 @@
   }
   .out { text-align: right; }
   .out .bubble { background: var(--accent); color: #fff; text-align: left; }
+  .files { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .shot {
+    max-width: min(260px, 70vw); max-height: 260px; border-radius: 12px;
+    border: 1px solid var(--line); cursor: zoom-in; display: block;
+  }
+  .out .files { justify-content: flex-end; }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+    font-size: .85em; border: 1px solid var(--line); border-radius: 10px;
+    margin: 0 12px 8px; width: fit-content; max-width: calc(100% - 24px);
+  }
+  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .script {
     margin-top: 5px; padding: 6px 9px; border-left: 2px solid var(--line);
     font-size: .88em; white-space: pre-wrap; opacity: .9;
@@ -165,9 +177,13 @@
 
 <div class="composer" id="composer" hidden>
   <button class="icon" onclick="emojiPad('reply', this)" title="Emoji">&#128512;</button>
+  <button class="icon" onclick="pickAttach()" title="Attach a picture">&#128206;</button>
   <input id="reply" placeholder="Reply…" onkeydown="if(event.key==='Enter')sendText()">
   <button class="primary" onclick="sendText()">&#10148; Send</button>
 </div>
+<div class="chip" id="attach" hidden></div>
+<input type="file" id="filePick" hidden accept="image/*,video/*,application/pdf"
+       onchange="fileChosen(this)">
 
 <main id="main" hidden></main>
 
@@ -198,6 +214,8 @@ let calls = [], msgs = [], officeText = '', names = {};
 let emails = [], openMail = null;
 let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
 let picked = new Set();
+let attached = null;        // the file waiting to go out with the next text
+const mediaUrls = {};       // key -> signed URL, so a refresh does not refetch
 const narrow = window.matchMedia('(max-width: 720px)');
 
 const FS_MIN = 13, FS_MAX = 26;
@@ -444,7 +462,8 @@ function textsHtml(g) {
   return g.msgs.map(m => `
     <div class="item ${m.dir === 'out' ? 'out' : ''}">
       <div class="bubble">${esc(m.text) || '<i>no text</i>'}</div>
-      <div class="muted">${esc(m.line)} · ${when(m.ts)}${m.media ? ` · ${m.media} attachment(s)` : ''}
+      ${filesHtml(m)}
+      <div class="muted">${esc(m.line)} · ${when(m.ts)}${missing(m) ? ` · ${missing(m)} attachment(s) not saved` : ''}
         ${m.dir !== 'out' ? `<button class="small" style="margin-left:6px"
           onclick="toMedtask('text','${esc(m.pk || m.id || '')}', this)">&#10140; MedTask</button>` : ''}</div>
     </div>`).join('');
@@ -468,6 +487,11 @@ function listRow(g) {
 }
 
 function render() {
+  paint();
+  loadShots();          // signed URLs for whatever pictures are now on screen
+}
+
+function paint() {
   if (tab === 'mail') return renderMail();
   if (tab !== 'inbox' && tab !== 'archived') return;
   const list = groups();
@@ -552,6 +576,8 @@ function render() {
             <div class="reply" style="margin:0 0 10px">
               <button class="small" onclick="emojiPad('r-${esc(g.key)}', this)"
                       title="Emoji" style="font-size:1em">&#128512;</button>
+              <button class="small" onclick="pickAttach()" title="Attach a picture"
+                      style="font-size:1em">&#128206;</button>
               <input id="r-${esc(g.key)}" placeholder="Reply…"
                      onkeydown="if(event.key==='Enter')sendText('${esc(g.key)}')">
               <button class="primary small" onclick="sendText('${esc(g.key)}')">&#10148; Send</button>
@@ -629,8 +655,8 @@ async function batch(action) {
   } catch (e) { say('Failed — ' + e.message); }
 }
 
-function openThread(key) { openKey = key; render(); }
-function closeThread() { openKey = null; openMail = null; render(); }
+function openThread(key) { openKey = key; dropAttach(); render(); }
+function closeThread() { openKey = null; openMail = null; dropAttach(); render(); }
 function toggle(key) { expanded.has(key) ? expanded.delete(key) : expanded.add(key); render(); }
 function useOffice(key) { (key ? $('r-' + key) : $('reply')).value = officeText; }
 
@@ -679,16 +705,95 @@ async function sendText(key) {
   const target = key || openKey;
   const box = key ? $('r-' + key) : $('reply');
   const text = box.value.trim();
-  if (!target || !text) return;
+  const files = attached ? [attached] : [];
+  if (!target || (!text && !files.length)) return;
   box.disabled = true;
-  say('Sending…');
+  say(files.length ? 'Sending attachment…' : 'Sending…');
   try {
-    const r = await api('POST', 'send', {to: target, text});
+    const r = await api('POST', 'send', {to: target, text, files});
     say(r.ok ? r.note : 'Not sent — ' + r.note);
-    if (r.ok) { box.value = ''; await refresh(); }
+    if (r.ok) { box.value = ''; dropAttach(); await refresh(); }
   } catch (e) { say('Not sent — ' + e.message); }
   box.disabled = false;
 }
+
+/* Attachments. One at a time: this is a phone panel, not a mail client. */
+const MAX_ATTACH = 4_500_000;
+function pickAttach() { $('filePick').click(); }
+async function fileChosen(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  if (f.size > MAX_ATTACH) { say('That file is too big to send as a text.'); return; }
+  const data = await new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = () => rej(new Error('could not read that file'));
+    fr.readAsDataURL(f);
+  }).catch(e => { say(e.message); return ''; });
+  if (!data) return;
+  attached = {name: f.name, type: f.type, data};
+  showAttach();
+}
+function showAttach() {
+  const chip = $('attach');
+  chip.hidden = !attached;
+  if (attached) {
+    chip.textContent = '';
+    const label = document.createElement('span');
+    label.textContent = '\uD83D\uDCCE ' + attached.name;
+    const drop = document.createElement('button');
+    drop.className = 'small';
+    drop.textContent = '\u2715';
+    drop.onclick = dropAttach;
+    chip.append(label, drop);
+  }
+}
+function dropAttach() { attached = null; showAttach(); }
+
+/* An attachment the panel holds, versus one the carrier sent that we could
+   not save: the count tells you which, so a gap is visible rather than silent. */
+function missing(m) {
+  return Math.max(0, (Number(m.media) || 0) - ((m.files || []).length));
+}
+function filesHtml(m) {
+  const files = m.files || [];
+  if (!files.length) return '';
+  return '<div class="files">' + files.map(f => {
+    const cached = mediaUrls[f.key];
+    if ((f.type || '').startsWith('image/')) {
+      return `<img class="shot" alt="attachment" onclick="zoom(this)"
+                   ${cached ? `src="${esc(cached)}"` : `data-mkey="${esc(f.key)}"`}>`;
+    }
+    return `<button class="small" onclick="openFile('${esc(f.key)}')">&#128206; ${
+      esc(f.name || 'attachment')}</button>`;
+  }).join('') + '</div>';
+}
+async function mediaLink(key) {
+  if (!mediaUrls[key]) {
+    const r = await api('GET', 'media?key=' + encodeURIComponent(key));
+    mediaUrls[key] = r.url;
+  }
+  return mediaUrls[key];
+}
+async function loadShots() {
+  for (const img of document.querySelectorAll('img.shot[data-mkey]')) {
+    const key = img.dataset.mkey;
+    delete img.dataset.mkey;
+    try { img.src = await mediaLink(key); }
+    catch (e) {
+      const note = document.createElement('div');
+      note.className = 'muted';
+      note.textContent = 'attachment unavailable';
+      img.replaceWith(note);
+    }
+  }
+}
+async function openFile(key) {
+  try { window.open(await mediaLink(key), '_blank', 'noopener'); }
+  catch (e) { say('Could not open that attachment.'); }
+}
+function zoom(img) { if (img.src) window.open(img.src, '_blank', 'noopener'); }
 async function play(key, btn) {
   const r = await api('GET', 'voicemail?key=' + encodeURIComponent(key));
   const a = document.createElement('audio');
