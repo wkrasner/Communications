@@ -1817,6 +1817,15 @@ class BrowserCalling(Base):
             "rawPath": "/admin/api/rtc_token",
             "headers": {"x-admin-token": "secret"}, "body": "{}"}, None)
 
+    def test_status_shows_the_softphone_setup(self):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                              "rawPath": "/admin/api/status",
+                              "headers": {"x-admin-token": "secret"},
+                              "body": ""}, None)
+        body = json.loads(r["body"])
+        self.assertEqual(body["softphone_credential"], "(not made yet)")
+        self.assertEqual(body["softphone_caller_id"], "+16095550002")
+
     def test_the_browser_gets_a_token_never_the_api_key(self):
         r = self.token()
         self.assertEqual(r["statusCode"], 200)
@@ -1872,6 +1881,24 @@ class BrowserCallingPanel(Base):
         page = self.page()
         self.assertIn("ringing your phone", page)
         self.assertIn("'call', {to}", page)        # the old bridge path remains
+
+    def test_the_fallback_always_says_why_it_happened(self):
+        page = self.page()
+        self.assertIn("In-page calling is off (${why})", page)
+        self.assertIn("rtcWhyNot = 'the calling library did not load'", page)
+        # One place rings the handset, so no path can drop the reason.
+        self.assertEqual(page.count("async function handset("), 1)
+        self.assertEqual(page.count("'call', {to}"), 1)
+
+    def test_the_sdk_is_waited_for_rather_than_assumed(self):
+        page = self.page()
+        self.assertIn("function sdkReady()", page)
+        self.assertIn("addEventListener('load', done)", page)
+        self.assertIn("setTimeout(done, 9000)", page)
+        self.assertNotIn("bundle.js\"\n        crossorigin=\"anonymous\" async", page)
+
+    def test_the_softphone_is_warmed_before_the_first_call(self):
+        self.assertIn("rtcReady().then(ok =>", self.page())
 
     def test_the_call_bar_can_mute_and_hang_up(self):
         page = self.page()

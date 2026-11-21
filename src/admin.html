@@ -249,7 +249,7 @@
 </div>
 <audio id="rtcAudio" autoplay></audio>
 <script src="https://unpkg.com/@telnyx/webrtc@2.28.2/lib/bundle.js"
-        crossorigin="anonymous" async></script>
+        crossorigin="anonymous" defer></script>
 <!-- Every paperclip is a <label for> on this one input. A label opens a
      file input natively, where a scripted .click() on a hidden input is
      unreliable on Android. Clipped rather than display:none, which would
@@ -714,6 +714,9 @@ async function newMessage() {
       }
     } catch (e) { say('Could not load contacts — ' + e.message); }
   }
+  rtcReady().then(ok => {
+    if (!ok && rtcWhyNot) say('Calls will ring your phone — ' + rtcWhyNot);
+  });
   const rows = fillBook();
   say(rows.length ? `${rows.length} contacts — type a name or a number.` : '');
 }
@@ -1161,16 +1164,44 @@ async function makeTask(key) {
    charge. Incoming calls are not handled here: Android suspends a
    backgrounded page and nothing can wake it, so Groundwire stays the thing
    that rings in your pocket. */
+const SDK_URL = 'https://unpkg.com/@telnyx/webrtc@2.28.2/lib/bundle.js';
+
 function rtcLib() {
   return (window.TelnyxWebRTC && window.TelnyxWebRTC.TelnyxRTC) || window.TelnyxRTC;
 }
 
+/** Wait for the SDK, loading it ourselves if the page tag has not landed. */
+function sdkReady() {
+  if (rtcLib()) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const done = () => resolve(!!rtcLib());
+    const tag = document.querySelector(`script[src="${SDK_URL}"]`);
+    if (tag) { tag.addEventListener('load', done); tag.addEventListener('error', done); }
+    else {
+      const add = document.createElement('script');
+      add.src = SDK_URL;
+      add.crossOrigin = 'anonymous';
+      add.onload = done;
+      add.onerror = done;
+      document.head.append(add);
+    }
+    setTimeout(done, 9000);       // never hang the Call button on a slow CDN
+  });
+}
+
+let rtcWhyNot = '';            // kept so the fallback can explain itself
+
 async function rtcReady() {
+  rtcWhyNot = '';
   if (rtc && rtc.connected) return true;
+  await sdkReady();
   const Lib = rtcLib();
-  if (!Lib) return false;                 // SDK blocked or still loading
-  const r = await api('POST', 'rtc_token', {});
-  if (!r.ok) { say('Could not call — ' + r.note); return false; }
+  if (!Lib) { rtcWhyNot = 'the calling library did not load'; return false; }
+  let r;
+  try {
+    r = await api('POST', 'rtc_token', {});
+  } catch (e) { rtcWhyNot = e.message; return false; }
+  if (!r.ok) { rtcWhyNot = r.note; return false; }
   rtcFrom = r.from || '';
   rtc = new Lib({login_token: r.token});
   rtc.remoteElement = 'rtcAudio';
@@ -1210,16 +1241,20 @@ async function callOut(to) {
       say('Calling ' + pretty(to) + ' from this page.');
       return;
     }
-    say('Ringing your phone…');      // no SDK: fall back to handset + bridge
-    const r = await api('POST', 'call', {to});
-    say(r.ok ? r.note : 'Could not call — ' + r.note);
+    return await handset(to, rtcWhyNot);
   } catch (e) {
-    say('Could not call in the page (' + e.message + ') — ringing your phone…');
-    try {
-      const r = await api('POST', 'call', {to});
-      say(r.ok ? r.note : 'Could not call — ' + r.note);
-    } catch (e2) { say('Could not call — ' + e2.message); }
+    return await handset(to, e.message);
   }
+}
+
+/** The old path: ring the handset, then bridge. Always says why it is here. */
+async function handset(to, why) {
+  const because = why ? `In-page calling is off (${why}) — ` : '';
+  say(because + 'ringing your phone…');
+  try {
+    const r = await api('POST', 'call', {to});
+    say(because + (r.ok ? r.note : 'could not call — ' + r.note));
+  } catch (e) { say(because + 'could not call — ' + e.message); }
 }
 
 function hangCall() {

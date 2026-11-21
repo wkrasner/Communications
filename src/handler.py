@@ -1286,6 +1286,10 @@ def admin_api(method, path, query, body, event=None):
             "has_openai_key": bool(OPENAI_KEY),
             "can_call_out": bool(RING_TARGET and API_KEY
                                  and os.environ.get("VOICE_APP_ID")),
+            "softphone_credential": (db_get("SETTING#rtc_cred") or {}).get(
+                "id", "(not made yet)"),
+            "softphone_caller_id": os.environ.get("GV_DID") or
+                                   os.environ.get("CELL_DID") or "(not set)",
             "record_calls": recording_on(),
             "office_phone": OFFICE_PHONE or "(not set)",
             "google_contacts": clean(db_get("STATE#gsync") or {}) or
