@@ -610,14 +610,21 @@ def latest_thread_route(contact):
     return ("cell", "")
 
 
-def thread_did(contact):
-    """The DID an inbound Telnyx text arrived on, so a reply goes back out it."""
+def thread_did(contact, was=""):
+    """The Telnyx DID a reply should leave from.
+
+    An inbound Telnyx text names its own DID. Otherwise pick the DID that
+    fronts the same line the thread came in on, so the number the recipient
+    sees is at least the right one of the two.
+    """
     msgs = [m for m in db_list("MSGS", 400) if m.get("contact") == contact]
     msgs.sort(key=lambda m: m.get("ts", ""), reverse=True)
     for m in msgs:
         if m.get("src") == "telnyx" and m.get("did"):
             return m["did"]
-    return next((d for d in LINES if d), "")
+    prefer = {"gv": os.environ.get("GV_DID", ""),
+              "cell": os.environ.get("CELL_DID", "")}.get(was, "")
+    return prefer or next((d for d in LINES if d), "")
 
 
 def telnyx_message(frm, to, text, media_urls=()):
@@ -647,10 +654,18 @@ def send_text(contact, text, via="", files=None):
         src = via
         if via != "gv":
             relay = ""
+    # Neither the Google Voice email relay nor the cell gateway app can carry
+    # a picture, so a picture goes out on the one line that can. The reply
+    # says which number it left from, since that is what the other side sees.
+    moved = ""
+    if files and src != "telnyx":
+        moved = "Google Voice" if src == "gv" else "your cell"
+        src, relay = "telnyx", ""
+
     if src == "telnyx":
         if not API_KEY:
             return False, "no Telnyx API key configured"
-        did = thread_did(contact)
+        did = thread_did(contact, was="gv" if moved == "Google Voice" else "cell")
         if not did:
             return False, "no Telnyx number to send from"
         ident = f"out-{now_iso()}"
@@ -665,11 +680,10 @@ def send_text(contact, text, via="", files=None):
             return False, f"Telnyx error: {e}"
         store_message(ident, contact, did, LINES.get(did, "Other"), text,
                       direction="out", src="telnyx", files=saved)
-        return True, "sent from " + (LINES.get(did) or did)
-    if files:
-        where = ("Google Voice replies go out as plain text"
-                 if src == "gv" else "your cell's SMS gateway sends text only")
-        return False, f"{where} — a picture can only go out on the Telnyx line"
+        note = "sent from " + (did or LINES.get(did, "Other"))
+        if moved:
+            note += f" — {moved} can't send pictures"
+        return True, note
     if src == "gv":
         if not (GMAIL_USER and GMAIL_APP_PASSWORD and relay):
             return False, "no Gmail credentials or no relay address for this thread"

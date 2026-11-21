@@ -208,8 +208,11 @@
   <button class="primary" onclick="sendText()">&#10148; Send</button>
 </div>
 <div class="chip" id="attach" hidden></div>
-<input type="file" id="filePick" hidden accept="image/*,video/*,application/pdf"
-       onchange="fileChosen(this)">
+<!-- Off-screen rather than hidden: a display:none input is not reliably
+     openable by script on Android, which is where this gets used. -->
+<input type="file" id="filePick" accept="image/*,video/*,application/pdf"
+       onchange="fileChosen(this)"
+       style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0">
 
 <main id="main" hidden></main>
 
@@ -750,7 +753,8 @@ function pickAttach() { $('filePick').click(); }
 async function fileChosen(input) {
   const f = input.files && input.files[0];
   input.value = '';
-  if (!f) return;
+  if (!f) { say(''); return; }
+  say('Reading ' + f.name + '…');
   if (f.size > MAX_ATTACH) { say('That file is too big to send as a text.'); return; }
   const data = await new Promise((res, rej) => {
     const fr = new FileReader();

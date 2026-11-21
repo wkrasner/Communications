@@ -1562,21 +1562,35 @@ class Attachments(Base):
         out = [i for i in self.db.values() if i.get("dir") == "out"][0]
         self.assertEqual(out["files"][0]["type"], "image/png")
 
-    def test_picture_on_a_google_voice_thread_is_refused_clearly(self):
+    def test_picture_on_a_google_voice_thread_leaves_on_the_gv_facing_did(self):
+        h.API_KEY = "KEY"
         h.store_message("gv-1", "+12155551234", "", "GV", "hi", src="gv",
                         relay="abc@txt.voice.google.com")
         ok, note = h.send_text("+12155551234", "see this",
                                files=[{"data": b"x", "content_type": "image/png"}])
-        self.assertFalse(ok)
-        self.assertIn("Telnyx line", note)
+        self.assertTrue(ok, note)
+        self.assertEqual(self.posts[0]["from"], "+16095550002")   # the GV line
+        self.assertEqual(len(self.posts[0]["media_urls"]), 1)
+        # The recipient sees a different number, so the panel has to say so.
+        self.assertIn("Google Voice can't send pictures", note)
 
-    def test_picture_on_a_cell_thread_is_refused_clearly(self):
+    def test_picture_on_a_cell_thread_leaves_on_the_cell_facing_did(self):
+        h.API_KEY = "KEY"
         h.GATEWAY_USER = h.GATEWAY_PASS = "x"
         h.store_message("c-1", "+12155551234", "", "Cell", "hi", src="cell")
         ok, note = h.send_text("+12155551234", "see this",
                                files=[{"data": b"x", "content_type": "image/png"}])
-        self.assertFalse(ok)
-        self.assertIn("text only", note)
+        self.assertTrue(ok, note)
+        self.assertEqual(self.posts[0]["from"], "+16095550001")   # the cell line
+        self.assertIn("your cell can't send pictures", note)
+
+    def test_a_plain_text_reply_still_goes_out_its_own_line(self):
+        h.API_KEY = "KEY"
+        h.store_message("gv-1", "+12155551234", "", "GV", "hi", src="gv",
+                        relay="abc@txt.voice.google.com")
+        h.send_mail = lambda *a, **k: (_ for _ in ()).throw(AssertionError("via gv"))
+        ok, note = h.send_text("+12155551234", "words only")
+        # No MMS call: text on a GV thread must not be rerouted to Telnyx.
         self.assertEqual(self.posts, [])
 
     def test_text_only_send_still_works_untouched(self):
