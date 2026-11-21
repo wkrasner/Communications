@@ -1682,6 +1682,47 @@ class NavBar(Base):
         self.assertIn("function navActive()", self.page())
 
 
+class InstallableApp(Base):
+    def get(self, path):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": path, "headers": {}, "body": ""}, None)
+
+    def test_manifest_has_what_android_needs_to_install(self):
+        r = self.get("/manifest.webmanifest")
+        self.assertEqual(r["statusCode"], 200)
+        self.assertEqual(r["headers"]["content-type"], "application/manifest+json")
+        m = json.loads(r["body"])
+        self.assertEqual(m["display"], "standalone")
+        self.assertEqual(m["start_url"], "/admin")
+        sizes = {i["sizes"] for i in m["icons"]}
+        self.assertIn("192x192", sizes)
+        self.assertIn("512x512", sizes)       # splash screen
+        self.assertIn("maskable", {i.get("purpose") for i in m["icons"]})
+
+    def test_service_worker_is_served_as_javascript(self):
+        r = self.get("/sw.js")
+        self.assertEqual(r["statusCode"], 200)
+        self.assertIn("javascript", r["headers"]["content-type"])
+        self.assertIn("addEventListener('fetch'", r["body"])
+
+    def test_the_worker_never_caches_live_data(self):
+        body = self.get("/sw.js")["body"]
+        self.assertIn("/admin/api/", body)
+        self.assertIn("never cache live data", body)
+        # Fresh first: the panel is redeployed too often to serve a stale shell.
+        self.assertLess(body.index("await fetch(event.request)"),
+                        body.index("caches.match"))
+
+    def test_the_panel_registers_the_worker(self):
+        self.assertIn("serviceWorker.register('/sw.js')", self.get("/admin")["body"])
+
+    def test_launcher_shortcuts_open_the_right_tab(self):
+        m = json.loads(self.get("/manifest.webmanifest")["body"])
+        self.assertEqual({s["url"] for s in m["shortcuts"]},
+                         {"/admin?go=new", "/admin?go=mail"})
+        self.assertIn("get('go')", self.get("/admin")["body"])
+
+
 class MailboxParsing(Base):
     def msg(self, raw):
         import email as e

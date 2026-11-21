@@ -1175,13 +1175,24 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && tab === 'inbox') refresh();
 });
 
+/* Installed-app support: the worker is what makes Chrome offer "Install",
+   and it lets the panel open with no signal. Data is never cached. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(e => {});
+  });
+}
+
 function start() {
   applyTextSize();
   if (!token) { $('login').hidden = false; return; }
   $('login').hidden = true;
   $('hdr').hidden = false;
   $('main').hidden = false;
-  show('inbox');
+  // Long-pressing the installed icon offers these.
+  const go = new URLSearchParams(location.search).get('go');
+  show(go === 'mail' ? 'mail' : 'inbox');
+  if (go === 'new') newMessage();
 }
 start();
 </script>

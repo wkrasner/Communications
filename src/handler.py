@@ -1305,6 +1305,9 @@ def on_gateway_post(body):
                   media=len(raw), files=files)
 
 
+ICON_SVG = ("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2713%27%20fill%3D%27%232563eb%27%2F%3E%3Cpath%20d%3D%27M9%209h46a5%205%200%200%201%205%205v24a5%205%200%200%201-5%205H26L13%2055V43H9a5%205%200%200%201-5-5V14a5%205%200%200%201%205-5z%27%20fill%3D%27%23ffffff%27%2F%3E%3Cg%20transform%3D%27translate%2833.6%2033.5%29%20scale%281.5%29%20translate%28-33.6%20-37%29%27%3E%3Cpath%20d%3D%27M41.6%2036.3c-1.4%200-2.8-.23-4.07-.65a1.14%201.14%200%200%200-1.17.28l-1.81%202.27c-3.26-1.56-6.32-4.5-7.95-7.88l2.25-1.91c.31-.32.4-.77.28-1.18a13.1%2013.1%200%200%201-.65-4.07c0-.62-.52-1.14-1.14-1.14h-3.99c-.62%200-1.36.28-1.36%201.14%200%2010.71%208.92%2019.62%2019.62%2019.62.82%200%201.14-.72%201.14-1.36v-3.98c0-.62-.52-1.14-1.14-1.14z%27%20fill%3D%27%232563eb%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E")
+
+
 def lambda_handler(event, context):
     # Background invocations rather than HTTP requests.
     if event.get("mail"):
@@ -1394,11 +1397,50 @@ def lambda_handler(event, context):
             "name": "Communications", "short_name": "Comms",
             "start_url": "/admin", "scope": "/admin", "display": "standalone",
             "background_color": "#ffffff", "theme_color": "#2563eb",
-            "icons": [{
-                "src": ("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2713%27%20fill%3D%27%232563eb%27%2F%3E%3Cpath%20d%3D%27M9%209h46a5%205%200%200%201%205%205v24a5%205%200%200%201-5%205H26L13%2055V43H9a5%205%200%200%201-5-5V14a5%205%200%200%201%205-5z%27%20fill%3D%27%23ffffff%27%2F%3E%3Cg%20transform%3D%27translate%2833.6%2033.5%29%20scale%281.5%29%20translate%28-33.6%20-37%29%27%3E%3Cpath%20d%3D%27M41.6%2036.3c-1.4%200-2.8-.23-4.07-.65a1.14%201.14%200%200%200-1.17.28l-1.81%202.27c-3.26-1.56-6.32-4.5-7.95-7.88l2.25-1.91c.31-.32.4-.77.28-1.18a13.1%2013.1%200%200%201-.65-4.07c0-.62-.52-1.14-1.14-1.14h-3.99c-.62%200-1.36.28-1.36%201.14%200%2010.71%208.92%2019.62%2019.62%2019.62.82%200%201.14-.72%201.14-1.36v-3.98c0-.62-.52-1.14-1.14-1.14z%27%20fill%3D%27%232563eb%27%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E"),
-                "sizes": "192x192", "type": "image/svg+xml", "purpose": "any",
-            }],
+            "icons": [
+                {"src": ICON_SVG, "sizes": "192x192",
+                 "type": "image/svg+xml", "purpose": "any"},
+                # Android wants a 512 for the splash screen, and a maskable
+                # copy so the launcher can crop it to the system shape.
+                {"src": ICON_SVG, "sizes": "512x512",
+                 "type": "image/svg+xml", "purpose": "any"},
+                {"src": ICON_SVG, "sizes": "512x512",
+                 "type": "image/svg+xml", "purpose": "maskable"},
+            ],
+            "description": "Calls, texts and email from your own numbers in one panel.",
+            "orientation": "any",
+            "shortcuts": [
+                {"name": "New message", "url": "/admin?go=new"},
+                {"name": "Email", "url": "/admin?go=mail"},
+            ],
         }, "application/manifest+json")
+
+    if path == "/sw.js" and method == "GET":
+        # Network first, cache as a fallback: the panel is redeployed often,
+        # so a stale shell would be worse than a slow one. The cache only
+        # exists so the app still opens with no signal.
+        return respond(200, """
+const SHELL = 'comms-shell-v1';
+self.addEventListener('install', e => self.skipWaiting());
+self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/admin/api/')) return;   // never cache live data
+  event.respondWith((async () => {
+    try {
+      const fresh = await fetch(event.request);
+      const cache = await caches.open(SHELL);
+      cache.put(event.request, fresh.clone());
+      return fresh;
+    } catch (e) {
+      const hit = await caches.match(event.request);
+      if (hit) return hit;
+      throw e;
+    }
+  })());
+});
+""".lstrip(), "text/javascript; charset=utf-8")
 
     if path == "/admin" and method == "GET":
         here = os.path.dirname(os.path.abspath(__file__))
