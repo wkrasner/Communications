@@ -232,7 +232,10 @@
     <h1>New message or call</h1>
   </header>
   <div style="padding:12px;display:grid;gap:10px;overflow-y:auto">
-    <input id="newTo" placeholder="Phone number" inputmode="tel" autocomplete="tel">
+    <input id="newTo" list="book" placeholder="Name or phone number"
+           autocomplete="off" oninput="resolveTo()">
+    <datalist id="book"></datalist>
+    <div id="resolved" class="muted"></div>
     <textarea id="newText" rows="4" placeholder="Message"></textarea>
     <div class="muted">Goes out from your cell. Google Voice can only reply inside a
       thread someone else started, so a new conversation can't be sent as 820-5401.</div>
@@ -643,21 +646,74 @@ function paint() {
   }).join('');
 }
 
-function newMessage() {
+async function newMessage() {
   $('newTo').value = ''; $('newText').value = '';
+  $('resolved').textContent = '';
   $('compose').hidden = false;
   $('newTo').focus();
+  // The contact book may not be loaded yet if this was opened from a
+  // launcher shortcut rather than from the list.
+  if (!Object.keys(names).length) {
+    try {
+      for (const row of await api('GET', 'numbers')) {
+        if (row.name) names[row.number] = row.name;
+      }
+    } catch (e) { say('Could not load contacts — ' + e.message); }
+  }
+  const rows = fillBook();
+  say(rows.length ? `${rows.length} contacts — type a name or a number.` : '');
 }
 function closeCompose() { $('compose').hidden = true; }
 async function callNew() {
-  const to = $('newTo').value.trim();
-  if (!to) { say('Need a number.'); return; }
+  const to = resolveTo();
+  if (!to) { say('Pick a contact or type a full number.'); return; }
   closeCompose();
   await callOut(to);
 }
+/** US numbers as a person reads them. */
+function pretty(num) {
+  const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(num || '');
+  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : (num || '');
+}
+
+/** Contacts for the picker: every number we have a name for, name first. */
+function fillBook() {
+  const rows = Object.entries(names)
+    .map(([number, name]) => ({number, name}))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  $('book').innerHTML = rows.map(r =>
+    `<option value="${esc(r.name + ' — ' + pretty(r.number))}"></option>`).join('');
+  return rows;
+}
+
+/** What the "to" field means: digits typed, or a name matched in contacts. */
+function resolveTo() {
+  const raw = ($('newTo').value || '').trim();
+  const digits = raw.replace(/[^\d+]/g, '');
+  let to = '', who = '';
+  if (digits.replace(/\D/g, '').length >= 10) {
+    to = digits;                              // typed or picked a number
+    who = names[to] || names['+1' + digits.replace(/\D/g, '').slice(-10)] || '';
+  } else if (raw) {
+    const low = raw.toLowerCase();
+    const hits = Object.entries(names).filter(([, n]) => n.toLowerCase().includes(low));
+    if (hits.length === 1) { to = hits[0][0]; who = hits[0][1]; }
+    else if (hits.length > 1) {
+      $('resolved').textContent =
+        `${hits.length} contacts match "${raw}" — keep typing or pick one.`;
+      return '';
+    }
+  }
+  $('resolved').textContent = to
+    ? (who ? `${who} · ${pretty(to)}` : pretty(to))
+    : (raw ? `No contact matches "${raw}" — type the number instead.` : '');
+  return to;
+}
+
 async function sendNew() {
-  const to = $('newTo').value.trim(), text = $('newText').value.trim();
-  if (!to || !text) { say('Need a number and a message.'); return; }
+  const to = resolveTo(), text = $('newText').value.trim();
+  if (!to) { say('Pick a contact or type a full number.'); return; }
+  if (!text) { say('Need a message.'); return; }
   say('Sending…');
   try {
     const r = await api('POST', 'send', {to, text, via: 'cell'});

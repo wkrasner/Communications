@@ -1751,6 +1751,39 @@ class InstallableApp(Base):
         self.assertIn("get('go')", self.get("/admin")["body"])
 
 
+class ContactLookup(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_the_new_message_field_takes_a_name(self):
+        page = self.page()
+        self.assertIn('placeholder="Name or phone number"', page)
+        self.assertIn('list="book"', page)
+        self.assertIn('<datalist id="book">', page)
+        self.assertIn("function fillBook()", page)
+
+    def test_both_actions_go_through_the_resolver(self):
+        page = self.page()
+        self.assertIn("const to = resolveTo(), text", page)      # send
+        self.assertIn("async function callNew() {\n  const to = resolveTo();", page)
+        self.assertNotIn("const to = $('newTo').value.trim();", page)
+
+    def test_an_ambiguous_or_unknown_name_is_reported_not_guessed(self):
+        page = self.page()
+        self.assertIn("keep typing or pick one", page)
+        self.assertIn("No contact matches", page)
+
+    def test_the_book_loads_even_from_a_launcher_shortcut(self):
+        self.assertIn("if (!Object.keys(names).length)", self.page())
+
+    def test_numbers_the_resolver_hands_back_are_understood(self):
+        # Whatever shape the field or the picker produces must normalize.
+        for typed in ("6095550123", "(609) 555-0123", "+16095550123"):
+            self.assertEqual(h.normalize(typed), "+16095550123", typed)
+
+
 class MailboxParsing(Base):
     def msg(self, raw):
         import email as e
