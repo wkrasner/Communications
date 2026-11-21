@@ -1915,6 +1915,19 @@ class BrowserCallingPanel(Base):
     def test_the_softphone_is_warmed_before_the_first_call(self):
         self.assertIn("rtcReady().then(ok =>", self.page())
 
+    def test_a_dropped_call_reports_its_cause(self):
+        page = self.page()
+        self.assertIn("c.cause", page)
+        self.assertIn("SIP ${c.sipCode}", page)
+        self.assertIn("c.sipReason", page)
+        self.assertIn("Call ended — ", page)
+
+    def test_the_connection_picks_the_caller_id_by_default(self):
+        page = self.page()
+        # Overriding From is the thing a credential connection refuses.
+        self.assertIn("rtcFromOn", page)
+        self.assertNotIn("callerNumber: rtcFrom,", page)
+
     def test_the_call_bar_can_mute_and_hang_up(self):
         page = self.page()
         self.assertIn("function hangCall()", page)

@@ -1208,19 +1208,25 @@ async function rtcReady() {
   rtc.on('telnyx.notification', n => {
     if (!n.call) return;
     rtcCall = n.call;
-    const state = n.call.state;
-    $('callwho').textContent = `${state} · ${n.call.options.destinationNumber || ''}`;
+    const c = n.call, state = c.state;
+    $('callwho').textContent = `${state} · ${c.options.destinationNumber || ''}`;
     $('callbar').hidden = false;
     if (state === 'hangup' || state === 'destroy') {
       $('callbar').hidden = true;
       $('tones').hidden = true;
       rtcCall = null;
-      say('Call ended.');
+      // Why it ended is the whole story when a call drops on dialling.
+      const bits = [c.cause, c.sipCode && `SIP ${c.sipCode}`, c.sipReason]
+        .filter(Boolean).join(' · ');
+      say(bits ? 'Call ended — ' + bits : 'Call ended.');
       refresh();
     }
   });
-  rtc.on('telnyx.error', e =>
-    say('Call problem — ' + ((e && e.error && e.error.message) || 'unknown')));
+  rtc.on('telnyx.error', e => {
+    const err = (e && e.error) || e || {};
+    say('Call problem — ' + [err.code, err.message || 'unknown']
+      .filter(Boolean).join(' '));
+  });
   await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('timed out connecting')), 12000);
     rtc.on('telnyx.ready', () => { clearTimeout(t); res(); });
@@ -1233,11 +1239,14 @@ async function callOut(to) {
   say('Starting call…');
   try {
     if (await rtcReady()) {
-      rtcCall = rtc.newCall({
-        destinationNumber: to,
-        callerNumber: rtcFrom,
-        audio: true, video: false,
-      });
+      // No callerNumber: the credential connection applies its own, exactly
+      // as it does for Groundwire. Overriding it is what a connection is
+      // most likely to refuse.
+      const opts = {destinationNumber: to, audio: true, video: false};
+      if (localStorage.getItem('rtcFromOn') === '1' && rtcFrom) {
+        opts.callerNumber = rtcFrom;
+      }
+      rtcCall = rtc.newCall(opts);
       say('Calling ' + pretty(to) + ' from this page.');
       return;
     }
