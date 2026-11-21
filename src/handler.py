@@ -610,6 +610,54 @@ def latest_thread_route(contact):
     return ("cell", "")
 
 
+def tapi(method, path, payload=None, text=False):
+    """A plain Telnyx REST call. Returns parsed JSON, or the raw body."""
+    req = urllib.request.Request(
+        f"{TELNYX_API}{path}",
+        data=None if payload is None else json.dumps(payload).encode(),
+        method=method,
+        headers={"Authorization": f"Bearer {API_KEY}",
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        raw = r.read()
+    if text:
+        return raw.decode("utf-8", "replace").strip()
+    return json.loads(raw or b"{}")
+
+
+RTC_CRED_NAME = "communications-panel"
+
+
+def rtc_credential():
+    """The panel's own SIP credential id, created once and remembered.
+
+    It must not be the one Groundwire uses: one credential is one SIP
+    registration, so sharing it would mean whichever registered last takes
+    the incoming calls.
+    """
+    row = db_get("SETTING#rtc_cred")
+    if row and row.get("id"):
+        return row["id"]
+
+    for c in tapi("GET", "/telephony_credentials").get("data", []):
+        if c.get("name") == RTC_CRED_NAME:
+            db_put({"pk": "SETTING#rtc_cred", "id": c["id"]})
+            return c["id"]
+
+    conns = tapi("GET", "/credential_connections").get("data", [])
+    if not conns:
+        raise RuntimeError("no SIP credential connection to attach to")
+    want = os.environ.get("SIP_CONNECTION_NAME", "").strip().lower()
+    conn = next((c for c in conns
+                 if want and want in (c.get("connection_name") or "").lower()),
+                conns[0])
+    made = tapi("POST", "/telephony_credentials",
+                {"connection_id": conn["id"], "name": RTC_CRED_NAME})
+    cred = made["data"]["id"]
+    db_put({"pk": "SETTING#rtc_cred", "id": cred})
+    return cred
+
+
 def thread_did(contact, was=""):
     """The Telnyx DID a reply should leave from.
 
@@ -1124,6 +1172,23 @@ def admin_api(method, path, query, body, event=None):
         except Exception as e:
             return 502, {"ok": False, "note": f"could not place the call: {e}"}
         return 200, {"ok": True, "note": "Your phone is ringing — answer to connect."}
+
+    if path == "/admin/api/rtc_token" and method == "POST":
+        # The browser never sees the API key; it gets a short-lived JWT.
+        if not API_KEY:
+            return 502, {"ok": False, "note": "no Telnyx API key configured"}
+        try:
+            cred = rtc_credential()
+            token = tapi("POST", f"/telephony_credentials/{cred}/token",
+                         payload={}, text=True)
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:300].decode("utf-8", "replace")
+            return 502, {"ok": False, "note": f"Telnyx {e.code}: {detail}"}
+        except Exception as e:
+            return 502, {"ok": False, "note": f"no calling token: {e}"}
+        return 200, {"ok": True, "token": token,
+                     "from": os.environ.get("GV_DID") or
+                             os.environ.get("CELL_DID") or ""}
 
     if path == "/admin/api/emails" and method == "GET":
         return 200, [clean(i) for i in db_list("EMAILS", 300)]

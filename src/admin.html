@@ -215,6 +215,15 @@
   <button class="primary" onclick="sendText()">&#10148; Send</button>
 </div>
 <div class="chip" id="attach" hidden></div>
+<!-- In-call bar. Only on screen while a browser call is up. -->
+<div class="chip" id="callbar" hidden>
+  <span id="callwho"></span>
+  <button class="small" onclick="muteCall(this)">&#127897; Mute</button>
+  <button class="small" onclick="hangCall()">&#9742; Hang up</button>
+</div>
+<audio id="rtcAudio" autoplay></audio>
+<script src="https://unpkg.com/@telnyx/webrtc@2.28.2/lib/bundle.js"
+        crossorigin="anonymous" async></script>
 <!-- Every paperclip is a <label for> on this one input. A label opens a
      file input natively, where a scripted .click() on a hidden input is
      unreliable on Android. Clipped rather than display:none, which would
@@ -256,6 +265,7 @@ let emails = [], openMail = null;
 let tab = 'inbox', openKey = null, expanded = new Set(), shut = new Set();
 let picked = new Set();
 let attached = null;        // the file waiting to go out with the next text
+let rtc = null, rtcCall = null, rtcFrom = '';   // the in-browser softphone
 const mediaUrls = {};       // key -> signed URL, so a refresh does not refetch
 const narrow = window.matchMedia('(max-width: 720px)');
 
@@ -1065,13 +1075,84 @@ async function makeTask(key) {
   }
 }
 
+/* Outbound calling in the page itself. One call leg instead of ringing the
+   handset and bridging, which is both quicker and avoids the per-transfer
+   charge. Incoming calls are not handled here: Android suspends a
+   backgrounded page and nothing can wake it, so Groundwire stays the thing
+   that rings in your pocket. */
+function rtcLib() {
+  return (window.TelnyxWebRTC && window.TelnyxWebRTC.TelnyxRTC) || window.TelnyxRTC;
+}
+
+async function rtcReady() {
+  if (rtc && rtc.connected) return true;
+  const Lib = rtcLib();
+  if (!Lib) return false;                 // SDK blocked or still loading
+  const r = await api('POST', 'rtc_token', {});
+  if (!r.ok) { say('Could not call — ' + r.note); return false; }
+  rtcFrom = r.from || '';
+  rtc = new Lib({login_token: r.token});
+  rtc.remoteElement = 'rtcAudio';
+  rtc.on('telnyx.notification', n => {
+    if (!n.call) return;
+    rtcCall = n.call;
+    const state = n.call.state;
+    $('callwho').textContent = `${state} · ${n.call.options.destinationNumber || ''}`;
+    $('callbar').hidden = false;
+    if (state === 'hangup' || state === 'destroy') {
+      $('callbar').hidden = true;
+      rtcCall = null;
+      say('Call ended.');
+      refresh();
+    }
+  });
+  rtc.on('telnyx.error', e =>
+    say('Call problem — ' + ((e && e.error && e.error.message) || 'unknown')));
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('timed out connecting')), 12000);
+    rtc.on('telnyx.ready', () => { clearTimeout(t); res(); });
+    rtc.connect();
+  });
+  return true;
+}
+
 async function callOut(to) {
-  say('Ringing your phone…');
+  say('Starting call…');
   try {
+    if (await rtcReady()) {
+      rtcCall = rtc.newCall({
+        destinationNumber: to,
+        callerNumber: rtcFrom,
+        audio: true, video: false,
+      });
+      say('Calling ' + pretty(to) + ' from this page.');
+      return;
+    }
+    say('Ringing your phone…');      // no SDK: fall back to handset + bridge
     const r = await api('POST', 'call', {to});
     say(r.ok ? r.note : 'Could not call — ' + r.note);
-  } catch (e) { say('Could not call — ' + e.message); }
+  } catch (e) {
+    say('Could not call in the page (' + e.message + ') — ringing your phone…');
+    try {
+      const r = await api('POST', 'call', {to});
+      say(r.ok ? r.note : 'Could not call — ' + r.note);
+    } catch (e2) { say('Could not call — ' + e2.message); }
+  }
 }
+
+function hangCall() {
+  if (rtcCall) { rtcCall.hangup(); rtcCall = null; }
+  $('callbar').hidden = true;
+}
+
+function muteCall(btn) {
+  if (!rtcCall) return;
+  rtcCall.toggleAudioMute();
+  btn.textContent = btn.textContent.includes('Mute')
+    ? '\uD83D\uDD0A Unmute' : '\uD83C\uDF99 Mute';
+}
+
+window.addEventListener('beforeunload', () => { if (rtc) rtc.disconnect(); });
 
 async function connectContacts() {
   say('Asking Google…');

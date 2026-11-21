@@ -1784,6 +1784,102 @@ class ContactLookup(Base):
             self.assertEqual(h.normalize(typed), "+16095550123", typed)
 
 
+class BrowserCalling(Base):
+    def setUp(self):
+        super().setUp()
+        h.API_KEY = "KEY"
+        self.calls = []
+        self.real = h.urllib.request.urlopen
+        self.creds = {"data": []}
+        self.conns = {"data": [{"id": "CONN1", "connection_name": "personalphone1"},
+                               {"id": "CONN2", "connection_name": "other"}]}
+
+        def fake(req, timeout=0):
+            self.calls.append((req.method, req.full_url.split("/v2")[-1],
+                               json.loads(req.data) if req.data else None))
+            path = req.full_url
+            if path.endswith("/token"):
+                return io.BytesIO(b"eyJhbGciOi.JWT.SIG\n")
+            if "/telephony_credentials" in path and req.method == "POST":
+                return io.BytesIO(b'{"data":{"id":"CRED9"}}')
+            if "/telephony_credentials" in path:
+                return io.BytesIO(json.dumps(self.creds).encode())
+            if "/credential_connections" in path:
+                return io.BytesIO(json.dumps(self.conns).encode())
+            return io.BytesIO(b"{}")
+
+        h.urllib.request.urlopen = fake
+        self.addCleanup(lambda: setattr(h.urllib.request, "urlopen", self.real))
+
+    def token(self):
+        return h.lambda_handler({
+            "requestContext": {"http": {"method": "POST"}},
+            "rawPath": "/admin/api/rtc_token",
+            "headers": {"x-admin-token": "secret"}, "body": "{}"}, None)
+
+    def test_the_browser_gets_a_token_never_the_api_key(self):
+        r = self.token()
+        self.assertEqual(r["statusCode"], 200)
+        body = json.loads(r["body"])
+        self.assertEqual(body["token"], "eyJhbGciOi.JWT.SIG")
+        self.assertNotIn("KEY", r["body"])
+        self.assertEqual(body["from"], "+16095550002")
+
+    def test_the_panel_gets_its_own_credential_not_groundwires(self):
+        self.token()
+        posts = [c for c in self.calls if c[0] == "POST"]
+        made = next(c for c in posts if c[1] == "/telephony_credentials")
+        self.assertEqual(made[2]["name"], h.RTC_CRED_NAME)
+        self.assertEqual(made[2]["connection_id"], "CONN1")
+
+    def test_the_credential_is_made_once_and_remembered(self):
+        self.token()
+        self.calls.clear()
+        self.token()
+        self.assertEqual([c[1] for c in self.calls],
+                         ["/telephony_credentials/CRED9/token"])
+
+    def test_an_existing_panel_credential_is_reused(self):
+        self.creds = {"data": [{"id": "OLD7", "name": h.RTC_CRED_NAME},
+                               {"id": "GW1", "name": "groundwire"}]}
+        self.token()
+        self.assertNotIn("POST", [c[0] for c in self.calls if
+                                  c[1] == "/telephony_credentials"])
+        self.assertIn("/telephony_credentials/OLD7/token",
+                      [c[1] for c in self.calls])
+
+    def test_no_connection_to_attach_to_is_reported(self):
+        self.conns = {"data": []}
+        r = self.token()
+        self.assertEqual(r["statusCode"], 502)
+        self.assertIn("credential connection", json.loads(r["body"])["note"])
+
+
+class BrowserCallingPanel(Base):
+    def page(self):
+        return h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                                 "rawPath": "/admin", "headers": {}, "body": ""},
+                                None)["body"]
+
+    def test_the_sdk_is_pinned_and_the_audio_sink_exists(self):
+        page = self.page()
+        self.assertIn("@telnyx/webrtc@2.28.2/lib/bundle.js", page)
+        self.assertIn('id="rtcAudio"', page)
+        # The UMD bundle exports under TelnyxWebRTC; cope with either name.
+        self.assertIn("window.TelnyxWebRTC", page)
+
+    def test_calling_falls_back_to_the_handset(self):
+        page = self.page()
+        self.assertIn("ringing your phone", page)
+        self.assertIn("'call', {to}", page)        # the old bridge path remains
+
+    def test_the_call_bar_can_mute_and_hang_up(self):
+        page = self.page()
+        self.assertIn("function hangCall()", page)
+        self.assertIn("toggleAudioMute", page)
+        self.assertIn('id="callbar"', page)
+
+
 class MailboxParsing(Base):
     def msg(self, raw):
         import email as e
