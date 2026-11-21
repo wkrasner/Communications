@@ -1650,9 +1650,23 @@ class AttachmentPanel(Base):
                               "rawPath": "/admin", "headers": {}, "body": ""}, None)
         return r["body"]
 
+    def test_the_attach_control_is_a_native_label_not_a_scripted_click(self):
+        page = self.page()
+        # A scripted click on a hidden input is unreliable on Android.
+        self.assertNotIn("pickAttach", page)
+        self.assertIn('for="filePick"', page)
+        self.assertIn('id="filePick"', page)
+        self.assertNotIn('type="file" id="filePick" hidden', page)
+
+    def test_a_failed_read_and_a_thrown_error_both_reach_the_screen(self):
+        page = self.page()
+        self.assertIn("Could not read that file", page)
+        self.assertIn("addEventListener('error'", page)
+        self.assertIn("unhandledrejection", page)
+        self.assertIn("Nothing to send yet", page)
+
     def test_composer_offers_an_attach_control_and_renders_files(self):
         page = self.page()
-        self.assertIn("pickAttach()", page)
         self.assertIn("filesHtml(m)", page)
         self.assertIn("api/media", page.replace("'media?key='", "api/media"))
 
