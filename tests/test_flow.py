@@ -4,6 +4,7 @@ import hmac
 import io
 import json
 import os
+import re
 import sys
 import unittest
 
@@ -952,12 +953,17 @@ class ButtonIcons(Base):
         page = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
                                  "rawPath": "/admin", "headers": {}, "body": ""},
                                 None)["body"]
+        # A nav tile puts its glyph in its own element; a button keeps it
+        # inline. Either way the glyph and the word must stay together.
+        flat = re.sub(r"\s+", " ", page.replace("<b>", "").replace("</b>", "")
+                      .replace("&#65039;", ""))
         for glyph, word in [("&#9742;", "Call"), ("&#10003;", "Allow"),
                             ("&#8856;", "Block"), ("&#128465;", "Delete"),
                             ("&#9654;", "Voicemail"), ("&#10148;", "Send"),
                             ("&#128222;", "Comms"), ("&#9993;", "Email"),
                             ("&#9881;", "Status")]:
-            self.assertIn(f"{glyph} {word}", page, word)
+            self.assertTrue(f"{glyph} {word}" in flat or f"{glyph}{word}" in flat,
+                            f"{word} lost its icon")
 
 
 class MessageOrder(Base):
@@ -1644,6 +1650,36 @@ class AttachmentPanel(Base):
     def test_attachments_are_not_pinned_to_pixels_for_width(self):
         # A sizeable font must not be squeezed by a fixed-width picture column.
         self.assertIn("max-width: min(260px, 70vw)", self.page())
+
+
+class NavBar(Base):
+    def page(self):
+        r = h.lambda_handler({"requestContext": {"http": {"method": "GET"}},
+                              "rawPath": "/admin", "headers": {}, "body": ""}, None)
+        return r["body"]
+
+    def test_the_ellipsis_menu_is_gone(self):
+        page = self.page()
+        self.assertNotIn("&#8942;", page)      # the vertical ellipsis
+        self.assertNotIn("toggleMenu", page)
+
+    def test_every_destination_has_its_own_colour_tile(self):
+        page = self.page()
+        for tile in ("tabInbox", "tabMail", "tabNew", "tabNums", "tabArch",
+                     "tabStatus"):
+            self.assertIn(f'id="{tile}"', page, tile)
+        # One distinct colour each, or the tiles stop being a cue.
+        inks = set(re.findall(r"--ink:(#[0-9a-f]{6})", page))
+        self.assertEqual(len(inks), 6, inks)
+
+    def test_the_nav_is_shown_rather_than_toggled(self):
+        page = self.page()
+        self.assertIn("$('menu').hidden = false", page)
+        self.assertNotIn("$('menu').hidden = true", page.replace(
+            "for (const id of ['hdr', 'menu'", "for (const id of ['hdr', 'x'"))
+
+    def test_the_tile_for_the_open_tab_is_marked(self):
+        self.assertIn("function navActive()", self.page())
 
 
 class MailboxParsing(Base):

@@ -51,6 +51,27 @@
     border-bottom: 1px solid var(--line); flex-shrink: 0;
   }
   header h1 { font-size: 1.06em; margin: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Every destination on screen at once: nothing that matters hides behind
+     a menu, and the colour tells you where you are at a glance. */
+  .nav {
+    display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
+    padding: 8px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0;
+  }
+  .nav > button {
+    flex: 1 1 5em; min-width: 5em; max-width: 10em;
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    padding: 6px 8px; min-height: 54px; line-height: 1.15;
+    border: 0; border-radius: 14px; font-size: .74em; font-weight: 700;
+    background: var(--ink); color: #fff; box-shadow: 0 1px 2px #0004;
+  }
+  .nav > button:active { transform: translateY(1px); }
+  .nav > button b {
+    font-size: 1.7em; font-weight: 400; font-variant-emoji: emoji;
+    filter: drop-shadow(0 1px 1px #0005);
+  }
+  /* The tab you are on: a white ring, which reads against any of the colours. */
+  .nav > button.on { outline: 3px solid #fff; outline-offset: -3px; }
+  .navend { display: flex; gap: 4px; align-items: center; margin-left: auto; }
   .bar { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
   main { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: var(--pad); }
   #msg { font-size: .82em; opacity: .65; }
@@ -119,7 +140,7 @@
 
   /* Wide screens: every contact on one page, calls and texts side by side. */
   @media (min-width: 721px) {
-    header, .bar, main, .composer { max-width: 1100px; margin-inline: auto; width: 100%; }
+    header, .bar, .nav, main, .composer { max-width: 1100px; margin-inline: auto; width: 100%; }
     .contact { border: 1px solid var(--line); border-radius: 11px; margin: 0 12px 14px; overflow: hidden; }
     .contact { border-top: 4px solid var(--accent); }
     .chead { display: flex; gap: 9px; align-items: center; padding: 10px 12px; background: var(--soft); }
@@ -142,23 +163,28 @@
 <header id="hdr" hidden>
   <button class="icon" id="back" onclick="closeThread()" hidden>&larr;</button>
   <h1 id="title">Communications</h1>
-  <button class="icon" id="newmsg" onclick="newMessage()" title="New message">&#9998;</button>
   <button class="icon" onclick="refresh()" title="Refresh">&#8635;</button>
-  <button class="icon" onclick="toggleMenu()" title="Menu">&#8942;</button>
 </header>
 
-<div class="bar" id="menu" hidden>
-  <button id="tabInbox" onclick="show('inbox')">&#128222; Comms</button>
-  <button id="tabMail" onclick="show('mail')">&#9993; Email</button>
-  <button id="tabNums" onclick="show('nums')">&#128100; Numbers</button>
-  <button id="tabArch" onclick="show('archived')">&#128230; Archived</button>
-  <button onclick="showStatus()">&#9881; Status</button>
-  <span style="margin-left:auto;display:flex;gap:4px;align-items:center">
+<div class="nav" id="menu" hidden>
+  <button id="tabInbox" style="--ink:#2563eb" onclick="show('inbox')"
+          title="Calls and texts"><b>&#128222;</b>Comms</button>
+  <button id="tabMail" style="--ink:#0d9488" onclick="show('mail')"
+          title="Email"><b>&#9993;&#65039;</b>Email</button>
+  <button id="tabNew" style="--ink:#15803d" onclick="newMessage()"
+          title="New message or call"><b>&#9999;&#65039;</b>New</button>
+  <button id="tabNums" style="--ink:#7c3aed" onclick="show('nums')"
+          title="Numbers and contacts"><b>&#128100;</b>Numbers</button>
+  <button id="tabArch" style="--ink:#b45309" onclick="show('archived')"
+          title="Archived threads"><b>&#128230;</b>Archived</button>
+  <button id="tabStatus" style="--ink:#475569" onclick="showStatus()"
+          title="System status"><b>&#9881;&#65039;</b>Status</button>
+  <span class="navend">
     <button class="small" onclick="textSize(-1)" title="Smaller text">A&minus;</button>
     <span id="fsnow" class="muted" style="min-width:34px;text-align:center"></span>
     <button class="small" onclick="textSize(1)" title="Larger text" style="font-size:1.1em">A+</button>
+    <button class="small" onclick="signOut()" title="Sign out">&#9094;</button>
   </span>
-  <button onclick="signOut()">&#9094; Sign out</button>
 </div>
 
 <div class="bar" id="searchbar" hidden>
@@ -263,15 +289,17 @@ function signOut() {
   for (const id of ['hdr', 'menu', 'searchbar', 'main', 'composer', 'compose']) $(id).hidden = true;
   $('login').hidden = false;
 }
-function toggleMenu() { $('menu').hidden = !$('menu').hidden; }
+/** Light up the tile for wherever we are now. */
+function navActive() {
+  const where = {tabInbox: 'inbox', tabMail: 'mail', tabNums: 'nums',
+                 tabArch: 'archived', tabStatus: 'status'};
+  for (const id in where) $(id).className = tab === where[id] ? 'on' : '';
+}
 
 function show(t) {
   tab = t; openKey = null; picked.clear(); showSel();
-  $('menu').hidden = true;
-  $('tabInbox').className = t === 'inbox' ? 'on' : '';
-  $('tabMail').className = t === 'mail' ? 'on' : '';
-  $('tabArch').className = t === 'archived' ? 'on' : '';
-  $('tabNums').className = t === 'nums' ? 'on' : '';
+  $('menu').hidden = false;
+  navActive();
   openMail = null;
   t === 'nums' ? loadNums() : refresh();
 }
@@ -598,7 +626,6 @@ function paint() {
 }
 
 function newMessage() {
-  $('menu').hidden = true;
   $('newTo').value = ''; $('newText').value = '';
   $('compose').hidden = false;
   $('newTo').focus();
@@ -821,8 +848,8 @@ async function mark(number, status) {
   refresh();
 }
 async function showStatus() {
-  $('menu').hidden = true;
   tab = 'status'; openKey = null;
+  navActive();
   $('searchbar').hidden = true; $('composer').hidden = true; $('back').hidden = true;
   $('title').textContent = 'Status';
   say('Loading…');
