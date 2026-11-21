@@ -19,14 +19,23 @@ class Base(unittest.TestCase):
         self.db, self.cmds, self.saved = {}, [], []
         self.fail_actions = set()
         h.db_get = lambda pk: self.db.get(pk)
-        h.db_put = lambda item: self.db.__setitem__(item["pk"], dict(item))
+        h.db_put = self._put
         h.db_update = lambda pk, **a: self.db.setdefault(pk, {}).update(a)
         h.db_delete = lambda pk: self.db.pop(pk, None)
         h.db_list = lambda kind, limit=200: [i for i in self.db.values() if i.get("gsi1pk") == kind]
+
         h.save_voicemail = lambda url, key: self.saved.append((url, key))
         h.telnyx = lambda ccid, action, body, event_id="": (
             self.cmds.append((ccid, action, body)), action not in self.fail_actions)[1]
         self.n = 0
+
+    def _put(self, item):
+        """DynamoDB rejects an item missing either key, so this must too."""
+        for key in ("pk", "sk"):
+            if not item.get(key):
+                raise AssertionError(
+                    f"item for {item.get('pk', '?')} is missing the key {key}")
+        self.db[item["pk"]] = dict(item)
 
     def ev(self, etype, ccid="A", state=None, **payload):
         self.n += 1
@@ -1840,6 +1849,12 @@ class BrowserCalling(Base):
         made = next(c for c in posts if c[1] == "/telephony_credentials")
         self.assertEqual(made[2]["name"], h.RTC_CRED_NAME)
         self.assertEqual(made[2]["connection_id"], "CONN1")
+
+    def test_the_remembered_credential_is_written_with_both_keys(self):
+        self.token()
+        row = self.db["SETTING#rtc_cred"]
+        self.assertEqual(row["sk"], "META")     # or DynamoDB refuses the item
+        self.assertEqual(row["id"], "CRED9")
 
     def test_the_credential_is_made_once_and_remembered(self):
         self.token()

@@ -641,7 +641,7 @@ def rtc_credential():
 
     for c in tapi("GET", "/telephony_credentials").get("data", []):
         if c.get("name") == RTC_CRED_NAME:
-            db_put({"pk": "SETTING#rtc_cred", "id": c["id"]})
+            db_put({"pk": "SETTING#rtc_cred", "sk": "META", "id": c["id"]})
             return c["id"]
 
     conns = tapi("GET", "/credential_connections").get("data", [])
@@ -654,7 +654,7 @@ def rtc_credential():
     made = tapi("POST", "/telephony_credentials",
                 {"connection_id": conn["id"], "name": RTC_CRED_NAME})
     cred = made["data"]["id"]
-    db_put({"pk": "SETTING#rtc_cred", "id": cred})
+    db_put({"pk": "SETTING#rtc_cred", "sk": "META", "id": cred})
     return cred
 
 
